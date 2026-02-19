@@ -4,7 +4,6 @@ A simple FastAPI application with a health check endpoint.
 """
 
 from fastapi import FastAPI
-from fastapi.responses import JSONResponse
 
 app = FastAPI(
     title="Peak V1 API",
@@ -22,10 +21,7 @@ async def root():
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return JSONResponse(
-        status_code=200,
-        content={
-            "status": "healthy",
-            "service": "Peak V1 API"
-        }
-    )
+    return {
+        "status": "healthy",
+        "service": "Peak V1 API"
+    }
