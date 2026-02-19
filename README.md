@@ -40,6 +40,16 @@ If you want to test database connectivity locally, set:
 export DATABASE_URL="postgresql://<user>:<password>@<host>:<port>/<db>"
 ```
 
+Set an API key for request authentication:
+```bash
+export PEAK_API_KEY="your-long-random-secret"
+```
+
+Call endpoints with your key:
+```bash
+curl -H "X-API-Key: $PEAK_API_KEY" http://localhost:8000/health
+```
+
 ### API Endpoints
 
 - `GET /` - Root endpoint
@@ -55,5 +65,5 @@ The application runs in development mode with auto-reload enabled when using the
 ### Deployment
 
 This application is designed to be deployed on Railway or similar platforms. Make sure to:
-1. Set the appropriate environment variables (`DATABASE_URL`, `PORT`)
+1. Set the appropriate environment variables (`DATABASE_URL`, `PEAK_API_KEY`, `PORT`)
 2. Configure the start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`

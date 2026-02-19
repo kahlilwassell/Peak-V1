@@ -4,16 +4,41 @@ A simple FastAPI application with a health check endpoint.
 """
 
 import os
+from typing import Optional
 from urllib.parse import urlparse
 
+import psycopg
+from fastapi import Depends
 from fastapi import FastAPI
 from fastapi import HTTPException
-import psycopg
+from fastapi import Security
+from fastapi import status
+from fastapi.security import APIKeyHeader
+
+API_KEY_ENV_VAR = "PEAK_API_KEY"
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
+
+
+def require_api_key(api_key: Optional[str] = Security(api_key_header)) -> None:
+    """Require a valid API key header for all endpoints."""
+    expected_api_key = os.getenv(API_KEY_ENV_VAR)
+    if not expected_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"{API_KEY_ENV_VAR} is not configured",
+        )
+
+    if api_key != expected_api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or missing API key",
+        )
 
 app = FastAPI(
     title="Peak V1 API",
     description="Backend API for Peak application",
-    version="1.0.0"
+    version="1.0.0",
+    dependencies=[Depends(require_api_key)],
 )
 
 
