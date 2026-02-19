@@ -35,10 +35,16 @@ uvicorn main:app --reload
 
 The API will be available at `http://localhost:8000`
 
+If you want to test database connectivity locally, set:
+```bash
+export DATABASE_URL="postgresql://<user>:<password>@<host>:<port>/<db>"
+```
+
 ### API Endpoints
 
 - `GET /` - Root endpoint
 - `GET /health` - Health check endpoint
+- `GET /health/db` - Database connectivity check (`SELECT 1`)
 - `GET /docs` - Interactive API documentation (Swagger UI)
 - `GET /redoc` - Alternative API documentation (ReDoc)
 
@@ -49,5 +55,5 @@ The application runs in development mode with auto-reload enabled when using the
 ### Deployment
 
 This application is designed to be deployed on Railway or similar platforms. Make sure to:
-1. Set the appropriate environment variables
+1. Set the appropriate environment variables (`DATABASE_URL`, `PORT`)
 2. Configure the start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
