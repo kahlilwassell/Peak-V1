@@ -1,9 +1,28 @@
--- Enable UUID generation
+# Peak MVP Backend Specification
+
+## Overview
+
+This document outlines the minimal backend design for Peak, including:
+
+- Database schema
+- API endpoints
+- Expected API responses
+
+The goal is to support:
+
+- Athlete profile storage
+- Strava data ingestion
+- Fueling preferences
+- Recommendation generation
+
+---
+
+# 1. Database Schema
+
+## Users
+
 create extension if not exists "pgcrypto";
 
--- =========================
--- USERS
--- =========================
 create table if not exists users (
   id uuid primary key default gen_random_uuid(),
   email text unique not null,
@@ -12,9 +31,10 @@ create table if not exists users (
   updated_at timestamptz not null default now()
 );
 
--- =========================
--- ATHLETE PROFILES
--- =========================
+---
+
+## Athlete Profiles
+
 create table if not exists athlete_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,
@@ -31,13 +51,14 @@ create table if not exists athlete_profiles (
   updated_at timestamptz not null default now()
 );
 
--- =========================
--- USER CONNECTIONS (STRAVA)
--- =========================
+---
+
+## User Connections (Strava)
+
 create table if not exists user_connections (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
-  provider text not null, -- 'strava'
+  provider text not null,
   provider_user_id text,
   access_token text,
   refresh_token text,
@@ -48,9 +69,10 @@ create table if not exists user_connections (
   unique (user_id, provider)
 );
 
--- =========================
--- WORKOUTS (CORE TABLE)
--- =========================
+---
+
+## Workouts
+
 create table if not exists workouts (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
@@ -77,16 +99,10 @@ create table if not exists workouts (
   unique (provider, provider_workout_id)
 );
 
--- Helpful indexes
-create index if not exists idx_workouts_user_start_date
-  on workouts(user_id, start_date desc);
+---
 
-create index if not exists idx_workouts_raw_gin
-  on workouts using gin (raw);
+## Fueling Profiles
 
--- =========================
--- FUELING PROFILES
--- =========================
 create table if not exists fueling_profiles (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null unique references users(id) on delete cascade,
@@ -101,14 +117,15 @@ create table if not exists fueling_profiles (
   updated_at timestamptz not null default now()
 );
 
--- =========================
--- RECOMMENDATIONS
--- =========================
+---
+
+## Recommendations
+
 create table if not exists recommendations (
   id uuid primary key default gen_random_uuid(),
   user_id uuid not null references users(id) on delete cascade,
   workout_id uuid references workouts(id) on delete set null,
-  recommendation_type text not null, -- 'pre', 'during', 'post', 'daily'
+  recommendation_type text not null,
   title text not null,
   body text not null,
   carb_grams numeric(6,2),
@@ -119,3 +136,40 @@ create table if not exists recommendations (
   status text not null default 'active',
   created_at timestamptz not null default now()
 );
+
+---
+
+# 2. API Endpoints
+
+## System
+
+- GET /
+- GET /health
+- GET /db/health
+
+## Users
+
+- POST /v1/users
+- GET /v1/users/{user_id}
+
+## Workouts
+
+- GET /v1/workouts/{user_id}
+- GET /v1/workout/{workout_id}
+
+## Fueling
+
+- POST /v1/fueling-profile
+- GET /v1/fueling-profile/{user_id}
+
+## Recommendations
+
+- POST /v1/recommendations/generate/{user_id}
+- GET /v1/recommendations/{user_id}
+
+---
+
+# 3. Guiding Principle
+
+Strava = source of raw workout data  
+Peak DB = source of product behavior
