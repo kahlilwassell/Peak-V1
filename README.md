@@ -1,178 +1,145 @@
 # Peak-V1
 
-Peak V1 is a FastAPI backend for Peak's core data model: users, user connections,
-workouts, athlete profiles, fueling profiles, and recommendations. The code is
-now organized into smaller modules under `app/` instead of a single large file.
+Minimal FastAPI backend for three core resources:
+
+- users
+- workouts imported from Strava
+- fueling plans
+
+This version intentionally avoids extra layers. The API is split into a small `app/` package and still uses SQLite for persistence.
+
+## Quick Start
+
+### Prerequisites
+
+- Python 3.8+
+- pip
+
+### Install
+
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### Run
+
+```bash
+uvicorn app.main:app --reload
+```
+
+The API will start on `http://localhost:8000`.
+
+### Run Tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
+
+The tests use a temporary SQLite database, so they do not touch your local `peak.db`.
+
+By default the app writes to `peak.db` in the project root. You can override that with:
+
+```bash
+export PEAK_DB_PATH=/absolute/path/to/peak.db
+```
 
 ## Project Layout
 
 ```text
 .
 ├── app/
-│   ├── main.py
-│   ├── config.py
-│   ├── dependencies.py
+│   ├── __init__.py
 │   ├── db.py
-│   ├── schemas.py
-│   ├── routers/
-│   │   ├── health.py
-│   │   ├── users.py
-│   │   ├── connections.py
-│   │   ├── workouts.py
-│   │   ├── profiles.py
-│   │   ├── recommendations.py
-│   │   └── strava.py
-│   └── services/
-│       └── strava.py
+│   ├── main.py
+│   └── schemas.py
 ├── main.py
-├── table_creation.sql
+├── README.md
 ├── requirements.txt
-└── .env.example
+├── requirements-dev.txt
+├── pytest.ini
+└── tests/
+    └── test_api.py
 ```
 
-`main.py` at the repo root remains the Uvicorn entrypoint and imports `app` from
-`app.main`.
+`main.py` at the repo root stays as the Uvicorn entrypoint and imports the app from `app.main`.
 
-## Prerequisites
-
-- Python 3.8 or higher
-- pip
-- PostgreSQL
-
-## Installation
-
-1. Clone the repository and enter it:
-
-```bash
-git clone https://github.com/kahlilwassell/Peak-V1.git
-cd Peak-V1
-```
-
-2. Create and activate a virtual environment:
-
-```bash
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-4. Export the environment variables shown in `.env.example`:
-
-```bash
-export DATABASE_URL="postgresql://<user>:<password>@<host>:<port>/<db>"
-export PEAK_API_KEY="your-long-random-secret"
-export STRAVA_CLIENT_ID="your-strava-client-id"
-export STRAVA_CLIENT_SECRET="your-strava-client-secret"
-export STRAVA_REDIRECT_URI="http://localhost:8000/v1/strava/connect/callback"
-```
-
-5. Create or update the database tables:
-
-```bash
-psql "$DATABASE_URL" -f table_creation.sql
-```
-
-## Running the Application
-
-Start the FastAPI server:
-
-```bash
-uvicorn main:app --reload
-```
-
-The API will be available at `http://localhost:8000`.
-
-Call endpoints with your API key:
-
-```bash
-curl -H "X-API-Key: $PEAK_API_KEY" http://localhost:8000/health
-```
-
-Interactive docs are available at:
-
-- `GET /docs`
-- `GET /redoc`
-
-## Current API Endpoints
+## Minimal Endpoints
 
 ### System
 
 - `GET /`
 - `GET /health`
-- `GET /health/db`
-- `GET /db/health`
 
 ### Users
 
 - `POST /users`
 - `GET /users`
 - `GET /users/{user_id}`
-- `PATCH /users/{user_id}`
-- `DELETE /users/{user_id}`
-- `POST /v1/users`
-- `GET /v1/users/{user_id}`
 
-### User Connections
-
-- `POST /users/{user_id}/connections`
-- `GET /users/{user_id}/connections`
-- `GET /connections/{connection_id}`
-- `PATCH /connections/{connection_id}`
-- `DELETE /connections/{connection_id}`
-
-### Workouts
+### Strava Workouts
 
 - `POST /users/{user_id}/workouts`
 - `GET /users/{user_id}/workouts`
 - `GET /workouts/{workout_id}`
-- `PATCH /workouts/{workout_id}`
-- `DELETE /workouts/{workout_id}`
-- `GET /v1/workouts/{user_id}`
-- `GET /v1/workout/{workout_id}`
 
-### Athlete and Fueling Profiles
+### Fueling Plans
 
-- `POST /users/{user_id}/athlete-profile`
-- `GET /users/{user_id}/athlete-profile`
-- `GET /athlete-profiles/{profile_id}`
-- `PATCH /athlete-profiles/{profile_id}`
-- `DELETE /athlete-profiles/{profile_id}`
-- `POST /users/{user_id}/fueling-profile`
-- `GET /users/{user_id}/fueling-profile`
-- `GET /fueling-profiles/{profile_id}`
-- `PATCH /fueling-profiles/{profile_id}`
-- `DELETE /fueling-profiles/{profile_id}`
-- `GET /v1/fueling-profile/{user_id}`
+- `POST /users/{user_id}/fueling-plans`
+- `GET /users/{user_id}/fueling-plans`
+- `GET /fueling-plans/{plan_id}`
 
-### Recommendations
+## Example Requests
 
-- `POST /users/{user_id}/recommendations`
-- `GET /users/{user_id}/recommendations`
-- `GET /recommendations/{recommendation_id}`
-- `PATCH /recommendations/{recommendation_id}`
-- `DELETE /recommendations/{recommendation_id}`
-- `GET /v1/recommendations/{user_id}`
+Create a user:
 
-### Strava OAuth Scaffold
+```bash
+curl -X POST http://localhost:8000/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Kahlil",
+    "email": "kahlil@example.com"
+  }'
+```
 
-- `GET /v1/strava/connect/start`
-- `GET /v1/strava/connect/callback`
+Store a Strava workout for that user:
 
-The Strava routes are scaffolding only right now:
+```bash
+curl -X POST http://localhost:8000/users/<user_id>/workouts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strava_activity_id": "123456789",
+    "name": "Morning Run",
+    "sport_type": "Run",
+    "start_date": "2026-03-28T06:30:00Z",
+    "distance_meters": 10000,
+    "moving_time_seconds": 2820,
+    "calories": 720,
+    "raw_data": {
+      "average_heartrate": 154
+    }
+  }'
+```
 
-- `connect/start` builds an authorization URL when the Strava env vars are set.
-- `connect/callback` returns `501 Not Implemented` because token exchange and
-  persistence are not wired yet.
+Attach a fueling plan to the user or a specific workout:
+
+```bash
+curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workout_id": "<optional_workout_id>",
+    "goal": "Long run fueling",
+    "carbs_per_hour": 75,
+    "hydration_ml_per_hour": 600,
+    "sodium_mg_per_hour": 700,
+    "notes": "Start at 20 minutes, then every 30 minutes."
+  }'
+```
 
 ## Notes
 
-- `table_creation.sql` is still the database source of truth.
-- `StravaDataPullRequirements.md` is the working checklist for the next Strava
-  integration milestone.
-- The current code intentionally keeps raw SQL and avoids adding an ORM during
-  this cleanup pass.
+- There is no auth layer in this minimal version.
+- Workouts are treated as Strava-sourced records and support storing the raw Strava payload.
+- Duplicate `strava_activity_id` values are blocked per user so the same workout is not imported twice.

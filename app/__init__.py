@@ -1,1 +1,1 @@
-"""Peak V1 application package."""
+from .main import app
