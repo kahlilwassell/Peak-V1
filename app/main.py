@@ -17,10 +17,10 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, status
 
 from app.db import (
-    DB_PATH,
     fetch_fueling_plan_or_404,
     fetch_user_or_404,
     fetch_workout_or_404,
+    get_db_path,
     get_connection,
     init_db,
     serialize_fueling_plan,
@@ -70,7 +70,7 @@ def root() -> Dict[str, Any]:
     return {
         "message": "Peak V1 API",
         "docs": "/docs",
-        "database_path": DB_PATH,
+        "database_path": get_db_path(),
     }
 
 

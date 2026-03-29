@@ -2,16 +2,20 @@ import json
 import os
 import sqlite3
 from contextlib import closing
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, status
 
 
-DB_PATH = os.getenv("PEAK_DB_PATH", "peak.db")
+DEFAULT_DB_PATH = "peak.db"
+
+
+def get_db_path() -> str:
+    return os.getenv("PEAK_DB_PATH", DEFAULT_DB_PATH)
 
 
 def get_connection() -> sqlite3.Connection:
-    connection = sqlite3.connect(DB_PATH)
+    connection = sqlite3.connect(get_db_path())
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON;")
     return connection
@@ -59,6 +63,21 @@ def init_db() -> None:
                 FOREIGN KEY (workout_id) REFERENCES workouts (id) ON DELETE SET NULL
             );
 
+            CREATE TABLE IF NOT EXISTS strava_connections (
+                id TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL UNIQUE,
+                strava_athlete_id TEXT NOT NULL UNIQUE,
+                strava_username TEXT,
+                access_token TEXT NOT NULL,
+                refresh_token TEXT NOT NULL,
+                expires_at TEXT NOT NULL,
+                scope TEXT,
+                last_synced_at TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_workouts_user_id
             ON workouts (user_id);
 
@@ -68,6 +87,9 @@ def init_db() -> None:
 
             CREATE INDEX IF NOT EXISTS idx_fueling_plans_user_id
             ON fueling_plans (user_id);
+
+            CREATE INDEX IF NOT EXISTS idx_strava_connections_user_id
+            ON strava_connections (user_id);
             """
         )
         connection.commit()
@@ -144,6 +166,30 @@ def fetch_fueling_plan_or_404(
     return row
 
 
+def fetch_strava_connection_by_user_id(
+    connection: sqlite3.Connection, user_id: str
+) -> Optional[sqlite3.Row]:
+    return connection.execute(
+        """
+        SELECT
+            id,
+            user_id,
+            strava_athlete_id,
+            strava_username,
+            access_token,
+            refresh_token,
+            expires_at,
+            scope,
+            last_synced_at,
+            created_at,
+            updated_at
+        FROM strava_connections
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+
 def serialize_user(row: sqlite3.Row) -> Dict[str, Any]:
     return dict(row)
 
@@ -156,3 +202,10 @@ def serialize_workout(row: sqlite3.Row) -> Dict[str, Any]:
 
 def serialize_fueling_plan(row: sqlite3.Row) -> Dict[str, Any]:
     return dict(row)
+
+
+def serialize_strava_connection(row: sqlite3.Row) -> Dict[str, Any]:
+    item = dict(row)
+    item.pop("access_token", None)
+    item.pop("refresh_token", None)
+    return item

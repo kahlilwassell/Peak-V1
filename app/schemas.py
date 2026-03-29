@@ -63,3 +63,24 @@ class FuelingPlanRead(BaseModel):
     sodium_mg_per_hour: Optional[int] = None
     notes: Optional[str] = None
     created_at: datetime
+
+
+class StravaConnectStartOut(BaseModel):
+    authorization_url: str
+
+
+class StravaConnectionRead(BaseModel):
+    id: str
+    user_id: str
+    strava_athlete_id: str
+    strava_username: Optional[str] = None
+    scope: Optional[str] = None
+    expires_at: datetime
+    last_synced_at: Optional[datetime] = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class StravaSyncOut(BaseModel):
+    imported_workouts: int
+    last_synced_at: datetime
