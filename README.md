@@ -1,53 +1,145 @@
 # Peak-V1
-This is the v1 version of the Peak backend API and Database
 
-## Getting Started
+Minimal FastAPI backend for three core resources:
+
+- users
+- workouts imported from Strava
+- fueling plans
+
+This version intentionally avoids extra layers. The API is split into a small `app/` package and still uses SQLite for persistence.
+
+## Quick Start
 
 ### Prerequisites
-- Python 3.8 or higher
-- pip (Python package installer)
 
-### Installation
+- Python 3.8+
+- pip
 
-1. Clone the repository:
-```bash
-git clone https://github.com/kahlilwassell/Peak-V1.git
-cd Peak-V1
-```
+### Install
 
-2. Create a virtual environment (recommended):
 ```bash
 python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-```
-
-3. Install dependencies:
-```bash
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Running the Application
+### Run
 
-Start the FastAPI server:
 ```bash
 uvicorn main:app --reload
 ```
 
-The API will be available at `http://localhost:8000`
+The API will start on `http://localhost:8000`.
 
-### API Endpoints
+### Run Tests
 
-- `GET /` - Root endpoint
-- `GET /health` - Health check endpoint
-- `GET /docs` - Interactive API documentation (Swagger UI)
-- `GET /redoc` - Alternative API documentation (ReDoc)
+```bash
+pip install -r requirements-dev.txt
+pytest
+```
 
-### Development
+The tests use a temporary SQLite database, so they do not touch your local `peak.db`.
 
-The application runs in development mode with auto-reload enabled when using the `--reload` flag.
+By default the app writes to `peak.db` in the project root. You can override that with:
 
-### Deployment
+```bash
+export PEAK_DB_PATH=/absolute/path/to/peak.db
+```
 
-This application is designed to be deployed on Railway or similar platforms. Make sure to:
-1. Set the appropriate environment variables
-2. Configure the start command: `uvicorn main:app --host 0.0.0.0 --port $PORT`
+## Project Layout
+
+```text
+.
+├── app/
+│   ├── __init__.py
+│   ├── db.py
+│   ├── main.py
+│   └── schemas.py
+├── main.py
+├── README.md
+├── requirements.txt
+├── requirements-dev.txt
+├── pytest.ini
+└── tests/
+    └── test_api.py
+```
+
+`main.py` at the repo root stays as the Uvicorn entrypoint and imports the app from `app.main`.
+
+## Minimal Endpoints
+
+### System
+
+- `GET /`
+- `GET /health`
+
+### Users
+
+- `POST /users`
+- `GET /users`
+- `GET /users/{user_id}`
+
+### Strava Workouts
+
+- `POST /users/{user_id}/workouts`
+- `GET /users/{user_id}/workouts`
+- `GET /workouts/{workout_id}`
+
+### Fueling Plans
+
+- `POST /users/{user_id}/fueling-plans`
+- `GET /users/{user_id}/fueling-plans`
+- `GET /fueling-plans/{plan_id}`
+
+## Example Requests
+
+Create a user:
+
+```bash
+curl -X POST http://localhost:8000/users \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Kahlil",
+    "email": "kahlil@example.com"
+  }'
+```
+
+Store a Strava workout for that user:
+
+```bash
+curl -X POST http://localhost:8000/users/<user_id>/workouts \
+  -H "Content-Type: application/json" \
+  -d '{
+    "strava_activity_id": "123456789",
+    "name": "Morning Run",
+    "sport_type": "Run",
+    "start_date": "2026-03-28T06:30:00Z",
+    "distance_meters": 10000,
+    "moving_time_seconds": 2820,
+    "calories": 720,
+    "raw_data": {
+      "average_heartrate": 154
+    }
+  }'
+```
+
+Attach a fueling plan to the user or a specific workout:
+
+```bash
+curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
+  -H "Content-Type: application/json" \
+  -d '{
+    "workout_id": "<optional_workout_id>",
+    "goal": "Long run fueling",
+    "carbs_per_hour": 75,
+    "hydration_ml_per_hour": 600,
+    "sodium_mg_per_hour": 700,
+    "notes": "Start at 20 minutes, then every 30 minutes."
+  }'
+```
+
+## Notes
+
+- There is no auth layer in this minimal version.
+- Workouts are treated as Strava-sourced records and support storing the raw Strava payload.
+- Duplicate `strava_activity_id` values are blocked per user so the same workout is not imported twice.
