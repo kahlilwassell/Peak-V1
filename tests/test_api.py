@@ -1,4 +1,3 @@
-import importlib
 import sys
 from pathlib import Path
 
@@ -16,13 +15,9 @@ def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("PEAK_DB_PATH", str(db_path))
 
-    import app.db as db_module
-    import app.main as app_module
+    from app.main import app
 
-    importlib.reload(db_module)
-    app_module = importlib.reload(app_module)
-
-    with TestClient(app_module.app) as test_client:
+    with TestClient(app) as test_client:
         yield test_client
 
 
@@ -150,3 +145,24 @@ def test_fueling_plan_rejects_other_users_workout(client):
 
     assert response.status_code == 400
     assert response.json()["detail"] == "Workout does not belong to this user."
+
+
+def test_init_db_creates_strava_connections_table(tmp_path, monkeypatch):
+    db_path = tmp_path / "schema-test.db"
+    monkeypatch.setenv("PEAK_DB_PATH", str(db_path))
+
+    import app.db as db_module
+
+    db_module.init_db()
+
+    with db_module.get_connection() as connection:
+        row = connection.execute(
+            """
+            SELECT name
+            FROM sqlite_master
+            WHERE type = 'table' AND name = 'strava_connections'
+            """
+        ).fetchone()
+
+    assert row is not None
+    assert row["name"] == "strava_connections"
