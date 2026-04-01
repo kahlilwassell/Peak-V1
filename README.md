@@ -7,6 +7,7 @@ Minimal FastAPI backend for three core resources:
 - fueling plans
 
 This version intentionally avoids extra layers. The API is split into a small `app/` package and still uses SQLite for persistence.
+It now also supports PostgreSQL when `DATABASE_URL` is set, which is the intended production path for Railway.
 
 ## Quick Start
 
@@ -31,6 +32,12 @@ uvicorn app.main:app --reload
 
 The API will start on `http://localhost:8000`.
 
+You can also run the production-style entrypoint locally:
+
+```bash
+python main.py
+```
+
 ### Run Tests
 
 ```bash
@@ -40,10 +47,16 @@ pytest
 
 The tests use a temporary SQLite database, so they do not touch your local `peak.db`.
 
-By default the app writes to `peak.db` in the project root. You can override that with:
+For local development, the app writes to `peak.db` in the project root by default. You can override that with:
 
 ```bash
 export PEAK_DB_PATH=/absolute/path/to/peak.db
+```
+
+For PostgreSQL environments such as Railway, set:
+
+```bash
+export DATABASE_URL=postgresql://postgres:password@localhost:5432/peak
 ```
 
 ## Project Layout
@@ -143,3 +156,10 @@ curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
 - There is no auth layer in this minimal version.
 - Workouts are treated as Strava-sourced records and support storing the raw Strava payload.
 - Duplicate `strava_activity_id` values are blocked per user so the same workout is not imported twice.
+
+## Railway Deployment
+
+- The repo includes `railway.json` with the start command and `/health` healthcheck.
+- Set `DATABASE_URL` on the `Peak-V1` service to the private connection string from the Railway Postgres service.
+- Keep `PEAK_DB_PATH` unset in production so the app uses PostgreSQL.
+- The repo includes `.github/workflows/ci.yml` so Railway's `Wait for CI` option can block deploys until tests pass.

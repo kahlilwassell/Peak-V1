@@ -8,7 +8,6 @@ This version keeps the backend intentionally small:
 """
 
 import json
-import sqlite3
 from contextlib import asynccontextmanager, closing
 from datetime import datetime, timezone
 from typing import Any, Dict, List
@@ -17,10 +16,13 @@ from uuid import uuid4
 from fastapi import FastAPI, HTTPException, status
 
 from app.db import (
+    INTEGRITY_ERRORS,
+    execute,
+    fetch_all,
     fetch_fueling_plan_or_404,
     fetch_user_or_404,
     fetch_workout_or_404,
-    get_db_path,
+    get_database_backend,
     get_connection,
     init_db,
     serialize_fueling_plan,
@@ -70,14 +72,14 @@ def root() -> Dict[str, Any]:
     return {
         "message": "Peak V1 API",
         "docs": "/docs",
-        "database_path": get_db_path(),
+        "database_backend": get_database_backend(),
     }
 
 
 @app.get("/health")
 def health_check() -> Dict[str, str]:
     with closing(get_connection()) as connection:
-        connection.execute("SELECT 1").fetchone()
+        execute(connection, "SELECT 1").fetchone()
     return {"status": "healthy", "database": "ok"}
 
 
@@ -90,7 +92,8 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
 
     with closing(get_connection()) as connection:
         try:
-            connection.execute(
+            execute(
+                connection,
                 """
                 INSERT INTO users (id, name, email, created_at)
                 VALUES (?, ?, ?, ?)
@@ -98,7 +101,7 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
                 (user_id, name, email, created_at),
             )
             connection.commit()
-        except sqlite3.IntegrityError as exc:
+        except INTEGRITY_ERRORS as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="A user with that email already exists.",
@@ -111,13 +114,14 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
 @app.get("/users", response_model=List[UserRead])
 def list_users() -> List[Dict[str, Any]]:
     with closing(get_connection()) as connection:
-        rows = connection.execute(
+        rows = fetch_all(
+            connection,
             """
             SELECT id, name, email, created_at
             FROM users
             ORDER BY created_at DESC
             """
-        ).fetchall()
+        )
     return [serialize_user(row) for row in rows]
 
 
@@ -143,7 +147,8 @@ def create_workout(user_id: str, payload: WorkoutCreate) -> Dict[str, Any]:
         fetch_user_or_404(connection, user_id)
 
         try:
-            connection.execute(
+            execute(
+                connection,
                 """
                 INSERT INTO workouts (
                     id,
@@ -178,7 +183,7 @@ def create_workout(user_id: str, payload: WorkoutCreate) -> Dict[str, Any]:
                 ),
             )
             connection.commit()
-        except sqlite3.IntegrityError as exc:
+        except INTEGRITY_ERRORS as exc:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
                 detail="That Strava activity is already stored for this user.",
@@ -192,7 +197,8 @@ def create_workout(user_id: str, payload: WorkoutCreate) -> Dict[str, Any]:
 def list_workouts(user_id: str) -> List[Dict[str, Any]]:
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)
-        rows = connection.execute(
+        rows = fetch_all(
+            connection,
             """
             SELECT
                 id,
@@ -213,7 +219,7 @@ def list_workouts(user_id: str) -> List[Dict[str, Any]]:
             ORDER BY start_date DESC, created_at DESC
             """,
             (user_id,),
-        ).fetchall()
+        )
     return [serialize_workout(row) for row in rows]
 
 
@@ -245,7 +251,8 @@ def create_fueling_plan(user_id: str, payload: FuelingPlanCreate) -> Dict[str, A
                     detail="Workout does not belong to this user.",
                 )
 
-        connection.execute(
+        execute(
+            connection,
             """
             INSERT INTO fueling_plans (
                 id,
@@ -282,7 +289,8 @@ def create_fueling_plan(user_id: str, payload: FuelingPlanCreate) -> Dict[str, A
 def list_fueling_plans(user_id: str) -> List[Dict[str, Any]]:
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)
-        rows = connection.execute(
+        rows = fetch_all(
+            connection,
             """
             SELECT
                 id,
@@ -299,7 +307,7 @@ def list_fueling_plans(user_id: str) -> List[Dict[str, Any]]:
             ORDER BY created_at DESC
             """,
             (user_id,),
-        ).fetchall()
+        )
     return [serialize_fueling_plan(row) for row in rows]
 
 
