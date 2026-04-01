@@ -13,6 +13,7 @@ if str(ROOT) not in sys.path:
 @pytest.fixture
 def client(tmp_path, monkeypatch):
     db_path = tmp_path / "test.db"
+    monkeypatch.delenv("DATABASE_URL", raising=False)
     monkeypatch.setenv("PEAK_DB_PATH", str(db_path))
 
     from app.main import app
@@ -56,6 +57,14 @@ def test_health_check(client):
 
     assert response.status_code == 200
     assert response.json() == {"status": "healthy", "database": "ok"}
+
+
+def test_root_reports_database_backend_without_exposing_path(client):
+    response = client.get("/")
+
+    assert response.status_code == 200
+    assert response.json()["database_backend"] == "sqlite"
+    assert "database_path" not in response.json()
 
 
 def test_create_get_and_list_users(client):
@@ -150,6 +159,7 @@ def test_fueling_plan_rejects_other_users_workout(client):
 def test_init_db_creates_strava_connections_table(tmp_path, monkeypatch):
     db_path = tmp_path / "schema-test.db"
     monkeypatch.setenv("PEAK_DB_PATH", str(db_path))
+    monkeypatch.delenv("DATABASE_URL", raising=False)
 
     import app.db as db_module
 
@@ -166,3 +176,12 @@ def test_init_db_creates_strava_connections_table(tmp_path, monkeypatch):
 
     assert row is not None
     assert row["name"] == "strava_connections"
+
+
+def test_database_backend_prefers_database_url(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://peak:secret@postgres.railway.internal:5432/railway")
+    monkeypatch.delenv("PEAK_DB_PATH", raising=False)
+
+    import app.db as db_module
+
+    assert db_module.get_database_backend() == "postgres"
