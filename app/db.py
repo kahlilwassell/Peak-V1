@@ -21,7 +21,12 @@ SCHEMA_STATEMENTS = [
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
         email TEXT NOT NULL UNIQUE,
-        created_at TEXT NOT NULL
+        password TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        dob DATE NOT NULL,
+        height INTEGER NOT NULL,
+        weight INTEGER NOT NULL,
+        is_male BOOLEAN NOT NULL
     )
     """,
     """
@@ -142,17 +147,30 @@ def fetch_all(
     return execute(connection, query, params).fetchall()
 
 
+_USER_MIGRATIONS = [
+    "ALTER TABLE users ADD COLUMN dob DATE NOT NULL DEFAULT '1900-01-01'",
+    "ALTER TABLE users ADD COLUMN height INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN weight INTEGER NOT NULL DEFAULT 0",
+    "ALTER TABLE users ADD COLUMN is_male BOOLEAN NOT NULL DEFAULT FALSE",
+]
+
+
 def init_db() -> None:
     with closing(get_connection()) as connection:
         for statement in SCHEMA_STATEMENTS:
             execute(connection, statement)
+        for migration in _USER_MIGRATIONS:
+            try:
+                execute(connection, migration)
+            except Exception:
+                pass
         connection.commit()
 
 
 def fetch_user_or_404(connection: ConnectionType, user_id: str) -> RowMapping:
     row = fetch_one(
         connection,
-        "SELECT id, name, email, created_at FROM users WHERE id = ?",
+        "SELECT id, name, email, created_at, dob, height, weight, is_male FROM users WHERE id = ?",
         (user_id,),
     )
     if row is None:

@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Dict, Optional
 
 from pydantic import BaseModel, Field
@@ -7,6 +7,11 @@ from pydantic import BaseModel, Field
 class UserCreate(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=100)
+    dob: date
+    height: int = Field(..., ge=0)
+    weight: int = Field(..., ge=0)
+    is_male: bool
 
 
 class UserRead(BaseModel):
@@ -14,6 +19,10 @@ class UserRead(BaseModel):
     name: str
     email: str
     created_at: datetime
+    dob: date
+    height: int
+    weight: int
+    is_male: bool
 
 
 class WorkoutCreate(BaseModel):
