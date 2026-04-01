@@ -163,3 +163,21 @@ curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
 - Set `DATABASE_URL` on the `Peak-V1` service to the private connection string from the Railway Postgres service.
 - Keep `PEAK_DB_PATH` unset in production so the app uses PostgreSQL.
 - The repo includes `.github/workflows/ci.yml` so Railway's `Wait for CI` option can block deploys until tests pass.
+
+## Smoke Test Script
+
+Run the smoke test script after a deploy to create or reuse a stable test user, workout, and fueling plan through the API itself:
+
+```bash
+python3 scripts/seed_smoke_data.py --base-url https://peak-v1-production.up.railway.app
+```
+
+The script is idempotent. It will:
+
+- verify `GET /health`
+- verify `GET /`
+- create or reuse `smoke-test@peak.local`
+- create or reuse a workout with `strava_activity_id=peak-smoke-activity`
+- create or reuse a fueling plan attached to that workout
+
+You can customize the seed values with flags or environment variables such as `PEAK_BASE_URL`, `PEAK_SMOKE_EMAIL`, and `PEAK_SMOKE_NAME`.
