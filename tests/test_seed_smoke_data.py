@@ -37,6 +37,10 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
                 "name": payload["name"],
                 "email": payload["email"].lower(),
                 "created_at": "2026-03-31T12:00:00Z",
+                "dob": payload["dob"],
+                "height": payload["height"],
+                "weight": payload["weight"],
+                "is_male": payload["is_male"],
             }
             return state["user"]
         if path == "/users/user-1" and method == "GET":
@@ -105,6 +109,16 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
 
     assert exit_code == 0
     assert "Smoke test succeeded." in captured.out
+    assert state["user"] == {
+        "id": "user-1",
+        "name": "Peak Smoke Test",
+        "email": "smoke-test@peak.local",
+        "created_at": "2026-03-31T12:00:00Z",
+        "dob": seed_smoke_data.DEFAULT_DOB,
+        "height": seed_smoke_data.DEFAULT_HEIGHT,
+        "weight": seed_smoke_data.DEFAULT_WEIGHT,
+        "is_male": seed_smoke_data.DEFAULT_IS_MALE,
+    }
     assert state["posts"] == [
         "/users",
         "/users/user-1/workouts",

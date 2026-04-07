@@ -22,12 +22,27 @@ def client(tmp_path, monkeypatch):
         yield test_client
 
 
-def create_user(client, *, name="Kahlil", email="kahlil@example.com"):
+def create_user(
+    client,
+    *,
+    name="Kahlil",
+    email="kahlil@example.com",
+    password="test-password",
+    dob="1994-03-15",
+    height=178,
+    weight=72,
+    is_male=True,
+):
     response = client.post(
         "/users",
         json={
             "name": name,
             "email": email,
+            "password": password,
+            "dob": dob,
+            "height": height,
+            "weight": weight,
+            "is_male": is_male,
         },
     )
     assert response.status_code == 201
@@ -75,9 +90,15 @@ def test_create_get_and_list_users(client):
 
     assert get_response.status_code == 200
     assert get_response.json()["email"] == "kahlil@example.com"
+    assert get_response.json()["dob"] == "1994-03-15"
+    assert get_response.json()["height"] == 178
+    assert get_response.json()["weight"] == 72
+    assert get_response.json()["is_male"] is True
+    assert "password" not in get_response.json()
     assert list_response.status_code == 200
     assert len(list_response.json()) == 1
     assert list_response.json()[0]["id"] == created["id"]
+    assert list_response.json()[0]["dob"] == "1994-03-15"
 
 
 def test_create_get_and_list_workouts(client):
