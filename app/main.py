@@ -89,16 +89,37 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
     created_at = utc_now_iso()
     name = normalize_required_text(payload.name, "name")
     email = normalize_required_text(payload.email, "email").lower()
+    password = normalize_required_text(payload.password, "password")
 
     with closing(get_connection()) as connection:
         try:
             execute(
                 connection,
                 """
-                INSERT INTO users (id, name, email, created_at)
-                VALUES (?, ?, ?, ?)
+                INSERT INTO users (
+                    id,
+                    name,
+                    email,
+                    password,
+                    created_at,
+                    dob,
+                    height,
+                    weight,
+                    is_male
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                (user_id, name, email, created_at),
+                (
+                    user_id,
+                    name,
+                    email,
+                    password,
+                    created_at,
+                    payload.dob.isoformat(),
+                    payload.height,
+                    payload.weight,
+                    payload.is_male,
+                ),
             )
             connection.commit()
         except INTEGRITY_ERRORS as exc:
@@ -117,7 +138,7 @@ def list_users() -> List[Dict[str, Any]]:
         rows = fetch_all(
             connection,
             """
-            SELECT id, name, email, created_at
+            SELECT id, name, email, created_at, dob, height, weight, is_male
             FROM users
             ORDER BY created_at DESC
             """

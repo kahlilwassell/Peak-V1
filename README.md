@@ -113,7 +113,12 @@ curl -X POST http://localhost:8000/users \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Kahlil",
-    "email": "kahlil@example.com"
+    "email": "kahlil@example.com",
+    "password": "super-secret-password",
+    "dob": "1994-03-15",
+    "height": 178,
+    "weight": 72,
+    "is_male": true
   }'
 ```
 

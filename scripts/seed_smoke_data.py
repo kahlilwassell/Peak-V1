@@ -12,6 +12,11 @@ from urllib import error, request
 DEFAULT_BASE_URL = "http://127.0.0.1:8000"
 DEFAULT_EMAIL = "smoke-test@peak.local"
 DEFAULT_NAME = "Peak Smoke Test"
+DEFAULT_PASSWORD = "peak-smoke-password"
+DEFAULT_DOB = "1990-01-01"
+DEFAULT_HEIGHT = 178
+DEFAULT_WEIGHT = 72
+DEFAULT_IS_MALE = True
 DEFAULT_ACTIVITY_ID = "peak-smoke-activity"
 DEFAULT_GOAL = "Smoke test fueling plan"
 
@@ -89,6 +94,11 @@ def ensure_user(base_url: str, headers: Dict[str, str], name: str, email: str) -
         payload={
             "name": name,
             "email": email,
+            "password": DEFAULT_PASSWORD,
+            "dob": DEFAULT_DOB,
+            "height": DEFAULT_HEIGHT,
+            "weight": DEFAULT_WEIGHT,
+            "is_male": DEFAULT_IS_MALE,
         },
     )
     return request_json(
