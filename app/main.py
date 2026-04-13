@@ -8,12 +8,13 @@ This version keeps the backend intentionally small:
 """
 
 import json
+import os
 from contextlib import asynccontextmanager, closing
 from datetime import datetime, timezone
 from typing import Any, Dict, List
 from uuid import uuid4
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Response, status
 
 from app.db import (
     INTEGRITY_ERRORS,
@@ -83,6 +84,35 @@ def health_check() -> Dict[str, str]:
     return {"status": "healthy", "database": "ok"}
 
 
+@app.post("/test/reset", status_code=204)
+def test_reset() -> Response:
+    """
+    Drop all tables and reinitialise the schema from scratch.
+
+    Only available when the PEAK_TESTING environment variable is set to "true".
+    This endpoint must never be reachable in production — guard with an env check
+    at the infrastructure level as well as here.
+    """
+    if os.getenv("PEAK_TESTING") != "true":
+        raise HTTPException(
+            status_code=403,
+            detail="This endpoint is only available in testing mode.",
+        )
+    # Drop in reverse FK dependency order so constraints don't block the drop
+    drop_order = ["fueling_plans", "workouts", "strava_connections", "users"]
+    with closing(get_connection()) as connection:
+        for table in drop_order:
+            execute(connection, f"DROP TABLE IF EXISTS {table}")
+        # Also drop indexes — they are recreated by init_db()
+        execute(connection, "DROP INDEX IF EXISTS idx_workouts_user_id")
+        execute(connection, "DROP INDEX IF EXISTS idx_workouts_user_strava_activity")
+        execute(connection, "DROP INDEX IF EXISTS idx_fueling_plans_user_id")
+        execute(connection, "DROP INDEX IF EXISTS idx_strava_connections_user_id")
+        connection.commit()
+    init_db()
+    return Response(status_code=204)
+
+
 @app.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def create_user(payload: UserCreate) -> Dict[str, Any]:
     user_id = str(uuid4())
@@ -96,24 +126,14 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
             execute(
                 connection,
                 """
-                INSERT INTO users (
-                    id,
-                    name,
-                    email,
-                    password,
-                    created_at,
-                    dob,
-                    height,
-                    weight,
-                    is_male
-                )
+                INSERT INTO users (id, name, email, password, created_at, dob, height, weight, is_male)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     user_id,
                     name,
                     email,
-                    password,
+                    payload.password,
                     created_at,
                     payload.dob.isoformat(),
                     payload.height,
@@ -138,6 +158,7 @@ def list_users() -> List[Dict[str, Any]]:
         rows = fetch_all(
             connection,
             """
+            SELECT id, name, email, created_at, dob, height, weight, is_male
             SELECT id, name, email, created_at, dob, height, weight, is_male
             FROM users
             ORDER BY created_at DESC
