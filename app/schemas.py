@@ -1,7 +1,25 @@
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=100)
+
+
+class UserUpdate(BaseModel):
+    """All fields are optional — only supplied fields are updated."""
+    height: Optional[int] = Field(default=None, ge=0)
+    weight: Optional[int] = Field(default=None, ge=0)
+    password: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "UserUpdate":
+        if self.height is None and self.weight is None and self.password is None:
+            raise ValueError("At least one field must be provided for an update.")
+        return self
 
 
 class UserCreate(BaseModel):
