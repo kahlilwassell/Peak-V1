@@ -1,7 +1,25 @@
 from datetime import date, datetime
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+
+class LoginRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=255)
+    password: str = Field(..., min_length=1, max_length=100)
+
+
+class UserUpdate(BaseModel):
+    """All fields are optional — only supplied fields are updated."""
+    height: Optional[int] = Field(default=None, ge=0)
+    weight: Optional[int] = Field(default=None, ge=0)
+    password: Optional[str] = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def at_least_one_field(self) -> "UserUpdate":
+        if self.height is None and self.weight is None and self.password is None:
+            raise ValueError("At least one field must be provided for an update.")
+        return self
 
 
 class UserCreate(BaseModel):
@@ -70,6 +88,34 @@ class FuelingPlanRead(BaseModel):
     carbs_per_hour: Optional[int] = None
     hydration_ml_per_hour: Optional[int] = None
     sodium_mg_per_hour: Optional[int] = None
+    notes: Optional[str] = None
+    created_at: datetime
+
+
+class RunningPlanCreate(BaseModel):
+    planned_at: datetime = Field(..., description="Scheduled run date/time (must be in the future)")
+    distance_km: float = Field(..., gt=0, description="Planned distance in kilometres")
+    speed_kph: float = Field(..., gt=0, description="Intended speed in km/h")
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def planned_at_must_be_future(self) -> "RunningPlanCreate":
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        planned = self.planned_at
+        if planned.tzinfo is None:
+            planned = planned.replace(tzinfo=timezone.utc)
+        if planned <= now:
+            raise ValueError("planned_at must be a future date and time.")
+        return self
+
+
+class RunningPlanRead(BaseModel):
+    id: str
+    user_id: str
+    planned_at: datetime
+    distance_km: float
+    speed_kph: float
     notes: Optional[str] = None
     created_at: datetime
 

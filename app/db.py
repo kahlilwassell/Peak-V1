@@ -95,6 +95,22 @@ SCHEMA_STATEMENTS = [
     CREATE INDEX IF NOT EXISTS idx_strava_connections_user_id
     ON strava_connections (user_id)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS running_plans (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        planned_at TEXT NOT NULL,
+        distance_km REAL NOT NULL,
+        speed_kph REAL NOT NULL,
+        notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_running_plans_user_id
+    ON running_plans (user_id)
+    """,
 ]
 RowMapping = Mapping[str, Any]
 ConnectionType = Any
@@ -152,6 +168,7 @@ _USER_MIGRATIONS = [
     "ALTER TABLE users ADD COLUMN height INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN weight INTEGER NOT NULL DEFAULT 0",
     "ALTER TABLE users ADD COLUMN is_male BOOLEAN NOT NULL DEFAULT FALSE",
+    "ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ''",
 ]
 
 
@@ -277,6 +294,28 @@ def serialize_workout(row: RowMapping) -> Dict[str, Any]:
 
 
 def serialize_fueling_plan(row: RowMapping) -> Dict[str, Any]:
+    return dict(row)
+
+
+def fetch_running_plan_or_404(connection: ConnectionType, plan_id: str) -> RowMapping:
+    row = fetch_one(
+        connection,
+        """
+        SELECT id, user_id, planned_at, distance_km, speed_kph, notes, created_at
+        FROM running_plans
+        WHERE id = ?
+        """,
+        (plan_id,),
+    )
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Running plan not found.",
+        )
+    return row
+
+
+def serialize_running_plan(row: RowMapping) -> Dict[str, Any]:
     return dict(row)
 
 
