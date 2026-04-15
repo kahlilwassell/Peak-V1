@@ -22,12 +22,14 @@ from app.db import (
     fetch_all,
     fetch_one,
     fetch_fueling_plan_or_404,
+    fetch_running_plan_or_404,
     fetch_user_or_404,
     fetch_workout_or_404,
     get_database_backend,
     get_connection,
     init_db,
     serialize_fueling_plan,
+    serialize_running_plan,
     serialize_user,
     serialize_workout,
 )
@@ -35,6 +37,8 @@ from app.schemas import (
     FuelingPlanCreate,
     FuelingPlanRead,
     LoginRequest,
+    RunningPlanCreate,
+    RunningPlanRead,
     UserCreate,
     UserRead,
     UserUpdate,
@@ -374,6 +378,59 @@ def get_fueling_plan(plan_id: str) -> Dict[str, Any]:
     with closing(get_connection()) as connection:
         row = fetch_fueling_plan_or_404(connection, plan_id)
         return serialize_fueling_plan(row)
+
+
+@app.post(
+    "/users/{user_id}/running-plans",
+    response_model=RunningPlanRead,
+    status_code=status.HTTP_201_CREATED,
+)
+def create_running_plan(user_id: str, payload: RunningPlanCreate) -> Dict[str, Any]:
+    """Create a scheduled running plan for a user."""
+    with closing(get_connection()) as connection:
+        fetch_user_or_404(connection, user_id)
+        plan_id = str(uuid4())
+        created_at = utc_now_iso()
+        # Store planned_at as whole-second ISO string (same rule as created_at)
+        planned_at = payload.planned_at.replace(microsecond=0).isoformat()
+        execute(
+            connection,
+            """
+            INSERT INTO running_plans
+                (id, user_id, planned_at, distance_km, speed_kph, notes, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                plan_id,
+                user_id,
+                planned_at,
+                payload.distance_km,
+                payload.speed_kph,
+                payload.notes,
+                created_at,
+            ),
+        )
+        connection.commit()
+        row = fetch_running_plan_or_404(connection, plan_id)
+        return serialize_running_plan(row)
+
+
+@app.get("/users/{user_id}/running-plans", response_model=List[RunningPlanRead])
+def list_running_plans(user_id: str) -> List[Dict[str, Any]]:
+    """List all running plans for a user, most recent first."""
+    with closing(get_connection()) as connection:
+        fetch_user_or_404(connection, user_id)
+        rows = fetch_all(
+            connection,
+            """
+            SELECT id, user_id, planned_at, distance_km, speed_kph, notes, created_at
+            FROM running_plans
+            WHERE user_id = ?
+            ORDER BY planned_at ASC
+            """,
+            (user_id,),
+        )
+    return [serialize_running_plan(row) for row in rows]
 
 
 @app.post("/auth/login", response_model=UserRead)

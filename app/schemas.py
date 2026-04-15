@@ -92,6 +92,34 @@ class FuelingPlanRead(BaseModel):
     created_at: datetime
 
 
+class RunningPlanCreate(BaseModel):
+    planned_at: datetime = Field(..., description="Scheduled run date/time (must be in the future)")
+    distance_km: float = Field(..., gt=0, description="Planned distance in kilometres")
+    speed_kph: float = Field(..., gt=0, description="Intended speed in km/h")
+    notes: Optional[str] = Field(default=None, max_length=2000)
+
+    @model_validator(mode="after")
+    def planned_at_must_be_future(self) -> "RunningPlanCreate":
+        from datetime import timezone
+        now = datetime.now(timezone.utc)
+        planned = self.planned_at
+        if planned.tzinfo is None:
+            planned = planned.replace(tzinfo=timezone.utc)
+        if planned <= now:
+            raise ValueError("planned_at must be a future date and time.")
+        return self
+
+
+class RunningPlanRead(BaseModel):
+    id: str
+    user_id: str
+    planned_at: datetime
+    distance_km: float
+    speed_kph: float
+    notes: Optional[str] = None
+    created_at: datetime
+
+
 class StravaConnectStartOut(BaseModel):
     authorization_url: str
 

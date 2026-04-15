@@ -266,6 +266,19 @@ def test_update_unknown_user_returns_404(client):
     assert response.status_code == 404
 
 
+def test_password_change_takes_effect_for_login(client):
+    """After PATCHing password, the old password must stop working and the new one must work."""
+    user = create_user(client, email="pw@peak.com", password="old-password")
+
+    client.patch(f"/users/{user['id']}", json={"password": "new-password"})
+
+    old = client.post("/auth/login", json={"email": "pw@peak.com", "password": "old-password"})
+    new = client.post("/auth/login", json={"email": "pw@peak.com", "password": "new-password"})
+
+    assert old.status_code == 401
+    assert new.status_code == 200
+
+
 # ---------------------------------------------------------------------------
 # Workouts — happy path
 # ---------------------------------------------------------------------------
@@ -315,6 +328,26 @@ def test_get_unknown_workout_returns_404(client):
     response = client.get("/workouts/does-not-exist")
 
     assert response.status_code == 404
+
+
+def test_list_workouts_for_unknown_user_returns_404(client):
+    response = client.get("/users/does-not-exist/workouts")
+
+    assert response.status_code == 404
+
+
+def test_workout_is_accessible_only_by_id_not_ownership_checked(client):
+    """Document current behaviour: GET /workouts/{id} does NOT enforce ownership.
+    Any caller who knows the workout ID can fetch it. Flag this if ownership
+    checks are added in future."""
+    user_a = create_user(client, email="a@peak.com")
+    user_b = create_user(client, email="b@peak.com")
+    workout = create_workout(client, user_a["id"], activity_id="a-workout")
+
+    # user_b fetches user_a's workout by ID — currently succeeds
+    response = client.get(f"/workouts/{workout['id']}")
+    assert response.status_code == 200
+    assert response.json()["user_id"] == user_a["id"]
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +421,129 @@ def test_get_unknown_fueling_plan_returns_404(client):
     response = client.get("/fueling-plans/does-not-exist")
 
     assert response.status_code == 404
+
+
+def test_list_fueling_plans_for_unknown_user_returns_404(client):
+    response = client.get("/users/does-not-exist/fueling-plans")
+
+    assert response.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Running plans
+# ---------------------------------------------------------------------------
+
+FUTURE_DATE = "2099-06-15T07:30:00+00:00"
+
+
+def create_running_plan(client, user_id, *, planned_at=FUTURE_DATE, distance_km=10.0, speed_kph=12.0):
+    response = client.post(
+        f"/users/{user_id}/running-plans",
+        json={
+            "planned_at": planned_at,
+            "distance_km": distance_km,
+            "speed_kph": speed_kph,
+        },
+    )
+    assert response.status_code == 201
+    return response.json()
+
+
+def test_create_and_list_running_plans(client):
+    user = create_user(client)
+    plan = create_running_plan(client, user["id"], distance_km=21.1, speed_kph=11.0)
+
+    assert plan["distance_km"] == 21.1
+    assert plan["speed_kph"] == 11.0
+    assert plan["user_id"] == user["id"]
+    assert "." not in plan["created_at"], "created_at must not have fractional seconds"
+    assert "." not in plan["planned_at"], "planned_at must not have fractional seconds"
+
+    list_resp = client.get(f"/users/{user['id']}/running-plans")
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) == 1
+
+
+def test_running_plans_ordered_by_planned_at_ascending(client):
+    user = create_user(client)
+    create_running_plan(client, user["id"], planned_at="2099-12-01T08:00:00+00:00")
+    create_running_plan(client, user["id"], planned_at="2099-06-01T06:00:00+00:00")
+    create_running_plan(client, user["id"], planned_at="2099-09-15T07:00:00+00:00")
+
+    plans = client.get(f"/users/{user['id']}/running-plans").json()
+    dates = [p["planned_at"] for p in plans]
+    assert dates == sorted(dates)
+
+
+def test_running_plan_past_date_rejected(client):
+    user = create_user(client)
+
+    response = client.post(
+        f"/users/{user['id']}/running-plans",
+        json={
+            "planned_at": "2000-01-01T00:00:00+00:00",
+            "distance_km": 5.0,
+            "speed_kph": 10.0,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_running_plan_zero_distance_rejected(client):
+    user = create_user(client)
+
+    response = client.post(
+        f"/users/{user['id']}/running-plans",
+        json={"planned_at": FUTURE_DATE, "distance_km": 0.0, "speed_kph": 10.0},
+    )
+
+    assert response.status_code == 422
+
+
+def test_running_plan_unknown_user_returns_404(client):
+    response = client.post(
+        "/users/ghost/running-plans",
+        json={"planned_at": FUTURE_DATE, "distance_km": 5.0, "speed_kph": 10.0},
+    )
+
+    assert response.status_code == 404
+
+
+def test_running_plan_with_notes(client):
+    user = create_user(client)
+    plan = create_running_plan(client, user["id"])
+
+    response = client.post(
+        f"/users/{user['id']}/running-plans",
+        json={
+            "planned_at": FUTURE_DATE,
+            "distance_km": 5.0,
+            "speed_kph": 10.0,
+            "notes": "Easy recovery run, keep HR below 140.",
+        },
+    )
+
+    assert response.status_code == 201
+    assert response.json()["notes"] == "Easy recovery run, keep HR below 140."
+
+
+def test_list_running_plans_for_unknown_user_returns_404(client):
+    response = client.get("/users/does-not-exist/running-plans")
+
+    assert response.status_code == 404
+
+
+def test_running_plan_zero_speed_rejected(client):
+    """speed_kph must be > 0 (schema Field gt=0)."""
+    user = create_user(client)
+
+    response = client.post(
+        f"/users/{user['id']}/running-plans",
+        json={"planned_at": FUTURE_DATE, "distance_km": 5.0, "speed_kph": 0.0},
+    )
+
+    assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
