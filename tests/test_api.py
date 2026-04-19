@@ -192,7 +192,7 @@ def test_created_at_timestamp_has_no_fractional_seconds(client):
     whole-second precision, e.g. '2026-04-14T01:46:52+00:00'."""
     user = create_user(client)
     headers = login_headers(client)
-    workout = create_workout(client, user["id"])
+    workout = create_workout(client, user["id"], headers=headers)
     plan = client.post(
         f"/users/{user['id']}/fueling-plans",
         headers=headers,
