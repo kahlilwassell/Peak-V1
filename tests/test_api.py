@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 
 import pytest
 from fastapi.testclient import TestClient
@@ -89,6 +90,16 @@ def create_workout(client, user_id, *, activity_id="123456789"):
     )
     assert response.status_code == 201
     return response.json()
+
+
+def login_headers(client, *, email="kahlil@example.com", password="test-password"):
+    response = client.post(
+        "/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert response.status_code == 200
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
 
 
 # ---------------------------------------------------------------------------
@@ -624,6 +635,193 @@ def test_login_response_created_at_has_no_fractional_seconds(client):
     assert "." not in user["created_at"], (
         f"created_at contains fractional seconds which Swift cannot parse: {user['created_at']!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Authentication — bearer token
+# ---------------------------------------------------------------------------
+
+
+def test_login_returns_bearer_token_and_auth_me(client):
+    create_user(client, email="runner@peak.com", password="secret")
+
+    login_response = client.post(
+        "/auth/login",
+        json={"email": "runner@peak.com", "password": "secret"},
+    )
+
+    assert login_response.status_code == 200
+    token = login_response.json()["access_token"]
+    assert login_response.json()["token_type"] == "bearer"
+    assert login_response.json()["expires_in"] > 0
+
+    me_response = client.get(
+        "/auth/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+
+    assert me_response.status_code == 200
+    assert me_response.json()["email"] == "runner@peak.com"
+    assert "password" not in me_response.json()
+
+
+def test_auth_me_requires_valid_bearer_token(client):
+    response = client.get("/auth/me")
+
+    assert response.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Strava OAuth
+# ---------------------------------------------------------------------------
+
+
+def test_strava_connect_requires_current_user_to_match_path(client, monkeypatch):
+    user_one = create_user(client, email="one@peak.com")
+    user_two = create_user(client, email="two@peak.com")
+    headers = login_headers(client, email="one@peak.com")
+    monkeypatch.setenv("STRAVA_CLIENT_ID", "123")
+    monkeypatch.setenv("STRAVA_REDIRECT_URI", "https://api.peak.test/strava/oauth/callback")
+
+    response = client.get(
+        f"/users/{user_two['id']}/strava/connect",
+        headers=headers,
+    )
+
+    assert user_one["id"] != user_two["id"]
+    assert response.status_code == 403
+
+
+def test_strava_connect_returns_authorization_url(client, monkeypatch):
+    user = create_user(client)
+    headers = login_headers(client)
+    monkeypatch.setenv("STRAVA_CLIENT_ID", "123")
+    monkeypatch.setenv("STRAVA_REDIRECT_URI", "https://api.peak.test/strava/oauth/callback")
+    monkeypatch.setenv("STRAVA_SCOPES", "read,activity:read_all")
+
+    response = client.get(f"/users/{user['id']}/strava/connect", headers=headers)
+
+    assert response.status_code == 200
+    url = response.json()["authorization_url"]
+    parsed = urlparse(url)
+    query = parse_qs(parsed.query)
+    assert parsed.netloc == "www.strava.com"
+    assert parsed.path == "/oauth/authorize"
+    assert query["client_id"] == ["123"]
+    assert query["redirect_uri"] == ["https://api.peak.test/strava/oauth/callback"]
+    assert query["scope"] == ["read,activity:read_all"]
+    assert query["response_type"] == ["code"]
+    assert "state" in query
+    assert "client_secret" not in query
+
+
+def test_strava_oauth_callback_stores_connection_without_exposing_tokens(
+    client,
+    monkeypatch,
+):
+    from app.auth import create_oauth_state
+
+    user = create_user(client)
+    headers = login_headers(client)
+    state = create_oauth_state(user["id"])
+
+    def fake_exchange_code_for_token(code):
+        assert code == "oauth-code"
+        return {
+            "access_token": "strava-access",
+            "refresh_token": "strava-refresh",
+            "expires_at": 4102444800,
+            "athlete": {"id": 987, "username": "peak-runner"},
+        }
+
+    monkeypatch.setattr(
+        "app.main.exchange_code_for_token",
+        fake_exchange_code_for_token,
+    )
+
+    callback_response = client.get(
+        "/strava/oauth/callback",
+        params={
+            "code": "oauth-code",
+            "scope": "read,activity:read_all",
+            "state": state,
+        },
+    )
+    connection_response = client.get(
+        f"/users/{user['id']}/strava/connection",
+        headers=headers,
+    )
+
+    assert callback_response.status_code == 200
+    assert callback_response.json()["status"] == "connected"
+    assert callback_response.json()["connection"]["strava_athlete_id"] == "987"
+    assert "access_token" not in callback_response.json()["connection"]
+    assert "refresh_token" not in callback_response.json()["connection"]
+    assert connection_response.status_code == 200
+    assert connection_response.json()["strava_username"] == "peak-runner"
+    assert "access_token" not in connection_response.json()
+    assert "refresh_token" not in connection_response.json()
+
+
+def test_strava_sync_refreshes_token_and_imports_new_workouts(client, monkeypatch):
+    from app.auth import create_oauth_state
+
+    user = create_user(client)
+    headers = login_headers(client)
+    state = create_oauth_state(user["id"])
+    seen = {}
+
+    monkeypatch.setattr(
+        "app.main.exchange_code_for_token",
+        lambda code: {
+            "access_token": "old-access",
+            "refresh_token": "old-refresh",
+            "expires_at": 946684800,
+            "athlete": {"id": 987, "username": "peak-runner"},
+        },
+    )
+    client.get(
+        "/strava/oauth/callback",
+        params={"code": "oauth-code", "scope": "read,activity:read_all", "state": state},
+    )
+
+    def fake_refresh_access_token(refresh_token):
+        assert refresh_token == "old-refresh"
+        return {
+            "access_token": "new-access",
+            "refresh_token": "new-refresh",
+            "expires_at": 4102444800,
+        }
+
+    def fake_fetch_athlete_activities(access_token):
+        seen["access_token"] = access_token
+        return [
+            {
+                "id": 12345,
+                "name": "Imported Run",
+                "sport_type": "Run",
+                "start_date": "2026-04-01T12:00:00Z",
+                "distance": 5000.0,
+                "moving_time": 1500,
+                "calories": 350,
+            }
+        ]
+
+    monkeypatch.setattr("app.main.refresh_access_token", fake_refresh_access_token)
+    monkeypatch.setattr("app.main.fetch_athlete_activities", fake_fetch_athlete_activities)
+
+    sync_response = client.post(
+        f"/users/{user['id']}/strava/sync",
+        headers=headers,
+    )
+    workouts_response = client.get(f"/users/{user['id']}/workouts")
+
+    assert sync_response.status_code == 200
+    assert sync_response.json()["imported_workouts"] == 1
+    assert seen["access_token"] == "new-access"
+    assert workouts_response.status_code == 200
+    assert workouts_response.json()[0]["strava_activity_id"] == "12345"
+    assert workouts_response.json()[0]["name"] == "Imported Run"
 
 
 # ---------------------------------------------------------------------------
