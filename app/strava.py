@@ -74,7 +74,7 @@ def _post_form_json(url: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Strava token request failed: {detail}",
         ) from exc
-    except (URLError, TimeoutError) as exc:
+    except URLError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Strava token request failed.",
@@ -124,7 +124,7 @@ def fetch_athlete_activities(access_token: str, *, per_page: int = 30) -> List[D
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Strava activities request failed: {detail}",
         ) from exc
-    except (URLError, TimeoutError) as exc:
+    except URLError as exc:
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail="Strava activities request failed.",
