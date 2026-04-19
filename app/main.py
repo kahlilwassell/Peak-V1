@@ -145,7 +145,7 @@ def require_current_user_matches_path(
     if current_user["id"] != user_id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="You can only access your own Strava connection.",
+            detail="You can only access your own resources.",
         )
     return current_user
 
@@ -242,29 +242,32 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
         return serialize_user(row)
 
 
-@app.get("/users", response_model=List[UserRead])
-def list_users() -> List[Dict[str, Any]]:
-    with closing(get_connection()) as connection:
-        rows = fetch_all(
-            connection,
-            """
-            SELECT id, name, email, created_at, dob, height, weight, is_male
-            FROM users
-            ORDER BY created_at DESC
-            """
-        )
-    return [serialize_user(row) for row in rows]
+@app.get("/users/me", response_model=UserRead)
+def get_current_user_profile(
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    return current_user
 
 
 @app.get("/users/{user_id}", response_model=UserRead)
-def get_user(user_id: str) -> Dict[str, Any]:
-    with closing(get_connection()) as connection:
-        row = fetch_user_or_404(connection, user_id)
-        return serialize_user(row)
+def get_user(
+    user_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
+    if current_user["id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this user.",
+        )
+    return current_user
 
 
 @app.patch("/users/{user_id}", response_model=UserRead)
-def update_user(user_id: str, payload: UserUpdate) -> Dict[str, Any]:
+def update_user(
+    user_id: str,
+    payload: UserUpdate,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> Dict[str, Any]:
     """
     Partially update a user profile.
     Accepts any combination of: height (cm), weight (kg), password.
@@ -299,7 +302,11 @@ def update_user(user_id: str, payload: UserUpdate) -> Dict[str, Any]:
     response_model=WorkoutRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_workout(user_id: str, payload: WorkoutCreate) -> Dict[str, Any]:
+def create_workout(
+    user_id: str,
+    payload: WorkoutCreate,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> Dict[str, Any]:
     workout_id = str(uuid4())
     created_at = utc_now_iso()
     name = normalize_required_text(payload.name, "name")
@@ -356,7 +363,10 @@ def create_workout(user_id: str, payload: WorkoutCreate) -> Dict[str, Any]:
 
 
 @app.get("/users/{user_id}/workouts", response_model=List[WorkoutRead])
-def list_workouts(user_id: str) -> List[Dict[str, Any]]:
+def list_workouts(
+    user_id: str,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> List[Dict[str, Any]]:
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)
         rows = fetch_all(
@@ -386,9 +396,17 @@ def list_workouts(user_id: str) -> List[Dict[str, Any]]:
 
 
 @app.get("/workouts/{workout_id}", response_model=WorkoutRead)
-def get_workout(workout_id: str) -> Dict[str, Any]:
+def get_workout(
+    workout_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
     with closing(get_connection()) as connection:
         row = fetch_workout_or_404(connection, workout_id)
+        if row["user_id"] != current_user["id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only access your own resources.",
+            )
         return serialize_workout(row)
 
 
@@ -397,7 +415,11 @@ def get_workout(workout_id: str) -> Dict[str, Any]:
     response_model=FuelingPlanRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_fueling_plan(user_id: str, payload: FuelingPlanCreate) -> Dict[str, Any]:
+def create_fueling_plan(
+    user_id: str,
+    payload: FuelingPlanCreate,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> Dict[str, Any]:
     plan_id = str(uuid4())
     created_at = utc_now_iso()
     goal = normalize_required_text(payload.goal, "goal")
@@ -448,7 +470,10 @@ def create_fueling_plan(user_id: str, payload: FuelingPlanCreate) -> Dict[str, A
 
 
 @app.get("/users/{user_id}/fueling-plans", response_model=List[FuelingPlanRead])
-def list_fueling_plans(user_id: str) -> List[Dict[str, Any]]:
+def list_fueling_plans(
+    user_id: str,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> List[Dict[str, Any]]:
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)
         rows = fetch_all(
@@ -474,9 +499,17 @@ def list_fueling_plans(user_id: str) -> List[Dict[str, Any]]:
 
 
 @app.get("/fueling-plans/{plan_id}", response_model=FuelingPlanRead)
-def get_fueling_plan(plan_id: str) -> Dict[str, Any]:
+def get_fueling_plan(
+    plan_id: str,
+    current_user: Dict[str, Any] = Depends(get_current_user),
+) -> Dict[str, Any]:
     with closing(get_connection()) as connection:
         row = fetch_fueling_plan_or_404(connection, plan_id)
+        if row["user_id"] != current_user["id"]:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only access your own resources.",
+            )
         return serialize_fueling_plan(row)
 
 
@@ -485,7 +518,11 @@ def get_fueling_plan(plan_id: str) -> Dict[str, Any]:
     response_model=RunningPlanRead,
     status_code=status.HTTP_201_CREATED,
 )
-def create_running_plan(user_id: str, payload: RunningPlanCreate) -> Dict[str, Any]:
+def create_running_plan(
+    user_id: str,
+    payload: RunningPlanCreate,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> Dict[str, Any]:
     """Create a scheduled running plan for a user."""
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)
@@ -516,7 +553,10 @@ def create_running_plan(user_id: str, payload: RunningPlanCreate) -> Dict[str, A
 
 
 @app.get("/users/{user_id}/running-plans", response_model=List[RunningPlanRead])
-def list_running_plans(user_id: str) -> List[Dict[str, Any]]:
+def list_running_plans(
+    user_id: str,
+    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+) -> List[Dict[str, Any]]:
     """List all running plans for a user, most recent first."""
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)

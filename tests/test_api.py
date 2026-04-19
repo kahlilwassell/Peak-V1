@@ -74,9 +74,22 @@ def create_user(
     return response.json()
 
 
-def create_workout(client, user_id, *, activity_id="123456789"):
+def login_headers(client, *, email="kahlil@example.com", password="test-password"):
+    response = client.post(
+        "/auth/login",
+        json={"email": email, "password": password},
+    )
+    assert response.status_code == 200
+    token = response.json()["access_token"]
+    return {"Authorization": f"Bearer {token}"}
+
+
+def create_workout(client, user_id, *, activity_id="123456789", headers=None):
+    if headers is None:
+        headers = login_headers(client)
     response = client.post(
         f"/users/{user_id}/workouts",
+        headers=headers,
         json={
             "strava_activity_id": activity_id,
             "name": "Morning Run",
@@ -90,16 +103,6 @@ def create_workout(client, user_id, *, activity_id="123456789"):
     )
     assert response.status_code == 201
     return response.json()
-
-
-def login_headers(client, *, email="kahlil@example.com", password="test-password"):
-    response = client.post(
-        "/auth/login",
-        json={"email": email, "password": password},
-    )
-    assert response.status_code == 200
-    token = response.json()["access_token"]
-    return {"Authorization": f"Bearer {token}"}
 
 
 # ---------------------------------------------------------------------------
@@ -161,11 +164,12 @@ def test_database_backend_prefers_database_url(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_create_get_and_list_users(client):
+def test_create_get_user_and_current_user_profile(client):
     created = create_user(client)
+    headers = login_headers(client)
 
-    get_response = client.get(f"/users/{created['id']}")
-    list_response = client.get("/users")
+    get_response = client.get(f"/users/{created['id']}", headers=headers)
+    me_response = client.get("/users/me", headers=headers)
 
     assert get_response.status_code == 200
     assert get_response.json()["email"] == "kahlil@example.com"
@@ -174,12 +178,19 @@ def test_create_get_and_list_users(client):
     assert get_response.json()["weight"] == 72
     assert get_response.json()["is_male"] is True
     assert "password" not in get_response.json()
-    assert list_response.status_code == 200
-    assert len(list_response.json()) == 1
-    assert list_response.json()[0]["id"] == created["id"]
-    assert list_response.json()[0]["dob"] == "1994-03-15"
-    # Password must never be exposed in list responses either
-    assert "password" not in list_response.json()[0]
+    assert me_response.status_code == 200
+    assert me_response.json()["id"] == created["id"]
+    assert me_response.json()["dob"] == "1994-03-15"
+    assert "password" not in me_response.json()
+
+
+def test_get_users_collection_is_not_supported(client):
+    create_user(client)
+    headers = login_headers(client)
+
+    response = client.get("/users", headers=headers)
+
+    assert response.status_code == 405
 
 
 def test_created_at_timestamp_has_no_fractional_seconds(client):
@@ -187,9 +198,11 @@ def test_created_at_timestamp_has_no_fractional_seconds(client):
     '2026-04-14T01:46:52.059007+00:00'. Every created_at we return must be
     whole-second precision, e.g. '2026-04-14T01:46:52+00:00'."""
     user = create_user(client)
-    workout = create_workout(client, user["id"])
+    headers = login_headers(client)
+    workout = create_workout(client, user["id"], headers=headers)
     plan = client.post(
         f"/users/{user['id']}/fueling-plans",
+        headers=headers,
         json={"goal": "Race fuel", "carbs_per_hour": 80},
     ).json()
 
@@ -205,9 +218,11 @@ def test_created_at_timestamp_has_no_fractional_seconds(client):
 
 def test_update_user_height_and_weight(client):
     user = create_user(client)
+    headers = login_headers(client)
 
     response = client.patch(
         f"/users/{user['id']}",
+        headers=headers,
         json={"height": 185, "weight": 80},
     )
 
@@ -221,9 +236,11 @@ def test_update_user_height_and_weight(client):
 
 def test_update_user_password(client):
     user = create_user(client, password="old-password")
+    headers = login_headers(client, password="old-password")
 
     response = client.patch(
         f"/users/{user['id']}",
+        headers=headers,
         json={"password": "new-secure-password"},
     )
 
@@ -235,8 +252,9 @@ def test_update_user_password(client):
 
 def test_update_user_empty_body_is_rejected(client):
     user = create_user(client)
+    headers = login_headers(client)
 
-    response = client.patch(f"/users/{user['id']}", json={})
+    response = client.patch(f"/users/{user['id']}", headers=headers, json={})
 
     assert response.status_code == 422
 
@@ -265,23 +283,67 @@ def test_duplicate_email_returns_conflict(client):
     assert response.status_code == 409
 
 
-def test_get_unknown_user_returns_404(client):
+def test_get_user_requires_authentication(client):
     response = client.get("/users/does-not-exist")
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
-def test_update_unknown_user_returns_404(client):
+def test_update_user_requires_authentication(client):
     response = client.patch("/users/does-not-exist", json={"height": 180})
 
-    assert response.status_code == 404
+    assert response.status_code == 401
+
+
+def test_user_scoped_routes_reject_other_users_path(client):
+    user_a = create_user(client, email="owner@peak.com")
+    user_b = create_user(client, email="other@peak.com")
+    headers_a = login_headers(client, email="owner@peak.com")
+
+    checks = [
+        ("GET", f"/users/{user_b['id']}", None),
+        ("PATCH", f"/users/{user_b['id']}", {"height": 181}),
+        (
+            "POST",
+            f"/users/{user_b['id']}/workouts",
+            {
+                "strava_activity_id": "cross-user-workout",
+                "name": "Cross-user workout",
+                "start_date": "2026-03-28T06:30:00Z",
+            },
+        ),
+        ("GET", f"/users/{user_b['id']}/workouts", None),
+        (
+            "POST",
+            f"/users/{user_b['id']}/fueling-plans",
+            {"goal": "Cross-user fueling"},
+        ),
+        ("GET", f"/users/{user_b['id']}/fueling-plans", None),
+        (
+            "POST",
+            f"/users/{user_b['id']}/running-plans",
+            {
+                "planned_at": "2099-06-15T07:30:00+00:00",
+                "distance_km": 5.0,
+                "speed_kph": 10.0,
+            },
+        ),
+        ("GET", f"/users/{user_b['id']}/running-plans", None),
+    ]
+
+    for method, path, payload in checks:
+        response = client.request(method, path, headers=headers_a, json=payload)
+        assert response.status_code == 403, f"{method} {path} should reject cross-user access"
+
+    assert user_a["id"] != user_b["id"]
 
 
 def test_password_change_takes_effect_for_login(client):
     """After PATCHing password, the old password must stop working and the new one must work."""
     user = create_user(client, email="pw@peak.com", password="old-password")
+    headers = login_headers(client, email="pw@peak.com", password="old-password")
 
-    client.patch(f"/users/{user['id']}", json={"password": "new-password"})
+    client.patch(f"/users/{user['id']}", headers=headers, json={"password": "new-password"})
 
     old = client.post("/auth/login", json={"email": "pw@peak.com", "password": "old-password"})
     new = client.post("/auth/login", json={"email": "pw@peak.com", "password": "new-password"})
@@ -297,10 +359,11 @@ def test_password_change_takes_effect_for_login(client):
 
 def test_create_get_and_list_workouts(client):
     user = create_user(client)
-    workout = create_workout(client, user["id"])
+    headers = login_headers(client)
+    workout = create_workout(client, user["id"], headers=headers)
 
-    get_response = client.get(f"/workouts/{workout['id']}")
-    list_response = client.get(f"/users/{user['id']}/workouts")
+    get_response = client.get(f"/workouts/{workout['id']}", headers=headers)
+    list_response = client.get(f"/users/{user['id']}/workouts", headers=headers)
 
     assert get_response.status_code == 200
     assert get_response.json()["source"] == "strava"
@@ -316,10 +379,12 @@ def test_create_get_and_list_workouts(client):
 
 def test_duplicate_strava_activity_returns_conflict(client):
     user = create_user(client)
-    create_workout(client, user["id"], activity_id="dup-1")
+    headers = login_headers(client)
+    create_workout(client, user["id"], activity_id="dup-1", headers=headers)
 
     response = client.post(
         f"/users/{user['id']}/workouts",
+        headers=headers,
         json={
             "strava_activity_id": "dup-1",
             "name": "Evening Run",
@@ -335,30 +400,34 @@ def test_duplicate_strava_activity_returns_conflict(client):
     )
 
 
-def test_get_unknown_workout_returns_404(client):
+def test_get_workout_requires_authentication(client):
     response = client.get("/workouts/does-not-exist")
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
-def test_list_workouts_for_unknown_user_returns_404(client):
+def test_list_workouts_requires_authentication(client):
     response = client.get("/users/does-not-exist/workouts")
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
-def test_workout_is_accessible_only_by_id_not_ownership_checked(client):
-    """Document current behaviour: GET /workouts/{id} does NOT enforce ownership.
-    Any caller who knows the workout ID can fetch it. Flag this if ownership
-    checks are added in future."""
+def test_workout_id_route_rejects_other_users_workout(client):
     user_a = create_user(client, email="a@peak.com")
     user_b = create_user(client, email="b@peak.com")
-    workout = create_workout(client, user_a["id"], activity_id="a-workout")
+    headers_a = login_headers(client, email="a@peak.com")
+    headers_b = login_headers(client, email="b@peak.com")
+    workout = create_workout(
+        client,
+        user_a["id"],
+        activity_id="a-workout",
+        headers=headers_a,
+    )
 
-    # user_b fetches user_a's workout by ID — currently succeeds
-    response = client.get(f"/workouts/{workout['id']}")
-    assert response.status_code == 200
-    assert response.json()["user_id"] == user_a["id"]
+    response = client.get(f"/workouts/{workout['id']}", headers=headers_b)
+
+    assert user_b["id"] != user_a["id"]
+    assert response.status_code == 403
 
 
 # ---------------------------------------------------------------------------
@@ -368,10 +437,12 @@ def test_workout_is_accessible_only_by_id_not_ownership_checked(client):
 
 def test_create_get_and_list_fueling_plans(client):
     user = create_user(client)
-    workout = create_workout(client, user["id"])
+    headers = login_headers(client)
+    workout = create_workout(client, user["id"], headers=headers)
 
     create_response = client.post(
         f"/users/{user['id']}/fueling-plans",
+        headers=headers,
         json={
             "workout_id": workout["id"],
             "goal": "Long run fueling",
@@ -382,8 +453,8 @@ def test_create_get_and_list_fueling_plans(client):
         },
     )
     plan = create_response.json()
-    get_response = client.get(f"/fueling-plans/{plan['id']}")
-    list_response = client.get(f"/users/{user['id']}/fueling-plans")
+    get_response = client.get(f"/fueling-plans/{plan['id']}", headers=headers)
+    list_response = client.get(f"/users/{user['id']}/fueling-plans", headers=headers)
 
     assert create_response.status_code == 201
     assert get_response.status_code == 200
@@ -396,9 +467,11 @@ def test_create_get_and_list_fueling_plans(client):
 def test_fueling_plan_without_workout(client):
     """Fueling plans don't require a workout_id."""
     user = create_user(client)
+    headers = login_headers(client)
 
     response = client.post(
         f"/users/{user['id']}/fueling-plans",
+        headers=headers,
         json={"goal": "General nutrition", "carbs_per_hour": 60},
     )
 
@@ -414,10 +487,18 @@ def test_fueling_plan_without_workout(client):
 def test_fueling_plan_rejects_other_users_workout(client):
     user_one = create_user(client, email="user-one@example.com")
     user_two = create_user(client, email="user-two@example.com")
-    workout = create_workout(client, user_one["id"], activity_id="foreign-workout")
+    headers_one = login_headers(client, email="user-one@example.com")
+    headers_two = login_headers(client, email="user-two@example.com")
+    workout = create_workout(
+        client,
+        user_one["id"],
+        activity_id="foreign-workout",
+        headers=headers_one,
+    )
 
     response = client.post(
         f"/users/{user_two['id']}/fueling-plans",
+        headers=headers_two,
         json={
             "workout_id": workout["id"],
             "goal": "Invalid plan",
@@ -428,16 +509,36 @@ def test_fueling_plan_rejects_other_users_workout(client):
     assert response.json()["detail"] == "Workout does not belong to this user."
 
 
-def test_get_unknown_fueling_plan_returns_404(client):
+def test_fueling_plan_id_route_rejects_other_users_plan(client):
+    user_a = create_user(client, email="fuel-owner@peak.com")
+    user_b = create_user(client, email="fuel-other@peak.com")
+    headers_a = login_headers(client, email="fuel-owner@peak.com")
+    headers_b = login_headers(client, email="fuel-other@peak.com")
+
+    create_response = client.post(
+        f"/users/{user_a['id']}/fueling-plans",
+        headers=headers_a,
+        json={"goal": "Private fueling plan"},
+    )
+    plan = create_response.json()
+
+    response = client.get(f"/fueling-plans/{plan['id']}", headers=headers_b)
+
+    assert user_a["id"] != user_b["id"]
+    assert create_response.status_code == 201
+    assert response.status_code == 403
+
+
+def test_get_fueling_plan_requires_authentication(client):
     response = client.get("/fueling-plans/does-not-exist")
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
-def test_list_fueling_plans_for_unknown_user_returns_404(client):
+def test_list_fueling_plans_requires_authentication(client):
     response = client.get("/users/does-not-exist/fueling-plans")
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -447,9 +548,20 @@ def test_list_fueling_plans_for_unknown_user_returns_404(client):
 FUTURE_DATE = "2099-06-15T07:30:00+00:00"
 
 
-def create_running_plan(client, user_id, *, planned_at=FUTURE_DATE, distance_km=10.0, speed_kph=12.0):
+def create_running_plan(
+    client,
+    user_id,
+    *,
+    headers=None,
+    planned_at=FUTURE_DATE,
+    distance_km=10.0,
+    speed_kph=12.0,
+):
+    if headers is None:
+        headers = login_headers(client)
     response = client.post(
         f"/users/{user_id}/running-plans",
+        headers=headers,
         json={
             "planned_at": planned_at,
             "distance_km": distance_km,
@@ -462,7 +574,14 @@ def create_running_plan(client, user_id, *, planned_at=FUTURE_DATE, distance_km=
 
 def test_create_and_list_running_plans(client):
     user = create_user(client)
-    plan = create_running_plan(client, user["id"], distance_km=21.1, speed_kph=11.0)
+    headers = login_headers(client)
+    plan = create_running_plan(
+        client,
+        user["id"],
+        headers=headers,
+        distance_km=21.1,
+        speed_kph=11.0,
+    )
 
     assert plan["distance_km"] == 21.1
     assert plan["speed_kph"] == 11.0
@@ -470,27 +589,45 @@ def test_create_and_list_running_plans(client):
     assert "." not in plan["created_at"], "created_at must not have fractional seconds"
     assert "." not in plan["planned_at"], "planned_at must not have fractional seconds"
 
-    list_resp = client.get(f"/users/{user['id']}/running-plans")
+    list_resp = client.get(f"/users/{user['id']}/running-plans", headers=headers)
     assert list_resp.status_code == 200
     assert len(list_resp.json()) == 1
 
 
 def test_running_plans_ordered_by_planned_at_ascending(client):
     user = create_user(client)
-    create_running_plan(client, user["id"], planned_at="2099-12-01T08:00:00+00:00")
-    create_running_plan(client, user["id"], planned_at="2099-06-01T06:00:00+00:00")
-    create_running_plan(client, user["id"], planned_at="2099-09-15T07:00:00+00:00")
+    headers = login_headers(client)
+    create_running_plan(
+        client,
+        user["id"],
+        headers=headers,
+        planned_at="2099-12-01T08:00:00+00:00",
+    )
+    create_running_plan(
+        client,
+        user["id"],
+        headers=headers,
+        planned_at="2099-06-01T06:00:00+00:00",
+    )
+    create_running_plan(
+        client,
+        user["id"],
+        headers=headers,
+        planned_at="2099-09-15T07:00:00+00:00",
+    )
 
-    plans = client.get(f"/users/{user['id']}/running-plans").json()
+    plans = client.get(f"/users/{user['id']}/running-plans", headers=headers).json()
     dates = [p["planned_at"] for p in plans]
     assert dates == sorted(dates)
 
 
 def test_running_plan_past_date_rejected(client):
     user = create_user(client)
+    headers = login_headers(client)
 
     response = client.post(
         f"/users/{user['id']}/running-plans",
+        headers=headers,
         json={
             "planned_at": "2000-01-01T00:00:00+00:00",
             "distance_km": 5.0,
@@ -503,30 +640,34 @@ def test_running_plan_past_date_rejected(client):
 
 def test_running_plan_zero_distance_rejected(client):
     user = create_user(client)
+    headers = login_headers(client)
 
     response = client.post(
         f"/users/{user['id']}/running-plans",
+        headers=headers,
         json={"planned_at": FUTURE_DATE, "distance_km": 0.0, "speed_kph": 10.0},
     )
 
     assert response.status_code == 422
 
 
-def test_running_plan_unknown_user_returns_404(client):
+def test_running_plan_requires_authentication(client):
     response = client.post(
         "/users/ghost/running-plans",
         json={"planned_at": FUTURE_DATE, "distance_km": 5.0, "speed_kph": 10.0},
     )
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
 def test_running_plan_with_notes(client):
     user = create_user(client)
-    plan = create_running_plan(client, user["id"])
+    headers = login_headers(client)
+    plan = create_running_plan(client, user["id"], headers=headers)
 
     response = client.post(
         f"/users/{user['id']}/running-plans",
+        headers=headers,
         json={
             "planned_at": FUTURE_DATE,
             "distance_km": 5.0,
@@ -539,18 +680,20 @@ def test_running_plan_with_notes(client):
     assert response.json()["notes"] == "Easy recovery run, keep HR below 140."
 
 
-def test_list_running_plans_for_unknown_user_returns_404(client):
+def test_list_running_plans_requires_authentication(client):
     response = client.get("/users/does-not-exist/running-plans")
 
-    assert response.status_code == 404
+    assert response.status_code == 401
 
 
 def test_running_plan_zero_speed_rejected(client):
     """speed_kph must be > 0 (schema Field gt=0)."""
     user = create_user(client)
+    headers = login_headers(client)
 
     response = client.post(
         f"/users/{user['id']}/running-plans",
+        headers=headers,
         json={"planned_at": FUTURE_DATE, "distance_km": 5.0, "speed_kph": 0.0},
     )
 
@@ -814,7 +957,7 @@ def test_strava_sync_refreshes_token_and_imports_new_workouts(client, monkeypatc
         f"/users/{user['id']}/strava/sync",
         headers=headers,
     )
-    workouts_response = client.get(f"/users/{user['id']}/workouts")
+    workouts_response = client.get(f"/users/{user['id']}/workouts", headers=headers)
 
     assert sync_response.status_code == 200
     assert sync_response.json()["imported_workouts"] == 1
@@ -839,13 +982,18 @@ def test_reset_forbidden_without_env_flag(client):
 def test_reset_wipes_and_reinitialises_database(testing_client):
     """After a reset, previously created users are gone and new ones can be made."""
     create_user(testing_client, email="before-reset@example.com")
-    assert len(testing_client.get("/users").json()) == 1
+    before_headers = login_headers(testing_client, email="before-reset@example.com")
+    before_response = testing_client.get("/users/me", headers=before_headers)
+    assert before_response.status_code == 200
 
     reset_response = testing_client.post("/test/reset")
     assert reset_response.status_code == 204
 
-    assert testing_client.get("/users").json() == []
+    stale_response = testing_client.get("/users/me", headers=before_headers)
+    assert stale_response.status_code == 401
 
     # Schema is intact — new registrations work immediately after reset
     create_user(testing_client, email="after-reset@example.com")
-    assert len(testing_client.get("/users").json()) == 1
+    after_headers = login_headers(testing_client, email="after-reset@example.com")
+    after_response = testing_client.get("/users/me", headers=after_headers)
+    assert after_response.status_code == 200
