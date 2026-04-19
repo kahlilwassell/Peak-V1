@@ -42,6 +42,7 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
             }
             return state["user"]
         if path == "/auth/login" and method == "POST":
+            assert state["user"] is not None, "login should happen after user creation"
             assert payload == {
                 "email": "smoke-test@peak.local",
                 "password": seed_smoke_data.DEFAULT_PASSWORD,
