@@ -107,7 +107,24 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
 
         raise AssertionError(f"Unexpected request: {method} {url}")
 
+    def fake_request_json_with_status(*, method, url, headers, expected_statuses, payload=None):
+        response = fake_request_json(
+            method=method,
+            url=url,
+            headers=headers,
+            expected_statuses=expected_statuses,
+            payload=payload,
+        )
+        if url.removeprefix(base_url) == "/users" and method == "POST":
+            return 201, response
+        return 200, response
+
     monkeypatch.setattr(seed_smoke_data, "request_json", fake_request_json)
+    monkeypatch.setattr(
+        seed_smoke_data,
+        "request_json_with_status",
+        fake_request_json_with_status,
+    )
     monkeypatch.setattr(
         seed_smoke_data,
         "parse_args",

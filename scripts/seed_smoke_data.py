@@ -61,6 +61,36 @@ def request_json(
         raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
 
 
+def request_json_with_status(
+    *,
+    method: str,
+    url: str,
+    headers: Dict[str, str],
+    expected_statuses: Iterable[int],
+    payload: Optional[Dict[str, Any]] = None,
+) -> Tuple[int, Any]:
+    body = None
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+
+    req = request.Request(url, data=body, method=method, headers=headers)
+    try:
+        with request.urlopen(req) as response:
+            raw = response.read().decode("utf-8")
+            if response.status not in expected_statuses:
+                raise RuntimeError(
+                    f"{method} {url} returned {response.status}, expected {sorted(expected_statuses)}."
+                )
+            return response.status, json.loads(raw) if raw else None
+    except error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="replace")
+        if exc.code in expected_statuses:
+            return exc.code, json.loads(detail) if detail else None
+        raise RuntimeError(f"{method} {url} failed with {exc.code}: {detail}") from exc
+    except error.URLError as exc:
+        raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
+
+
 def normalize_base_url(raw_base_url: str) -> str:
     return raw_base_url.rstrip("/")
 
@@ -84,7 +114,7 @@ def ensure_user(
     name: str,
     email: str,
 ) -> Tuple[Dict[str, Any], Dict[str, str]]:
-    request_json(
+    create_status, created_user = request_json_with_status(
         method="POST",
         url=f"{base_url}/users",
         headers=headers,
@@ -99,6 +129,15 @@ def ensure_user(
             "is_male": DEFAULT_IS_MALE,
         },
     )
+    if (
+        create_status == 201
+        and (
+            not isinstance(created_user, dict)
+            or created_user.get("email") != email.lower()
+        )
+    ):
+        raise RuntimeError("Created smoke-test user response did not match the requested email.")
+
     login = request_json(
         method="POST",
         url=f"{base_url}/auth/login",
