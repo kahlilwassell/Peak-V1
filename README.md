@@ -59,15 +59,34 @@ For PostgreSQL environments such as Railway, set:
 export DATABASE_URL=postgresql://postgres:password@localhost:5432/peak
 ```
 
+For authenticated routes and Strava OAuth, set:
+
+```bash
+export PEAK_AUTH_SECRET=replace-with-a-long-random-string
+export STRAVA_CLIENT_ID=your-strava-client-id
+export STRAVA_CLIENT_SECRET=your-strava-client-secret
+export STRAVA_REDIRECT_URI=http://localhost:8000/strava/oauth/callback
+```
+
+Optional Strava-related settings:
+
+```bash
+export STRAVA_SCOPES=read,activity:read_all
+export PEAK_STRAVA_SUCCESS_REDIRECT_URL=http://localhost:3000/settings/integrations
+export PEAK_STRAVA_FAILURE_REDIRECT_URL=http://localhost:3000/settings/integrations
+```
+
 ## Project Layout
 
 ```text
 .
 ├── app/
 │   ├── __init__.py
+│   ├── auth.py
 │   ├── db.py
 │   ├── main.py
-│   └── schemas.py
+│   ├── schemas.py
+│   └── strava.py
 ├── main.py
 ├── README.md
 ├── requirements.txt
@@ -92,11 +111,23 @@ export DATABASE_URL=postgresql://postgres:password@localhost:5432/peak
 - `GET /users`
 - `GET /users/{user_id}`
 
+### Authentication
+
+- `POST /auth/login`
+- `GET /auth/me`
+
 ### Strava Workouts
 
 - `POST /users/{user_id}/workouts`
 - `GET /users/{user_id}/workouts`
 - `GET /workouts/{workout_id}`
+
+### Strava OAuth
+
+- `GET /users/{user_id}/strava/connect`
+- `GET /strava/oauth/callback`
+- `GET /users/{user_id}/strava/connection`
+- `POST /users/{user_id}/strava/sync`
 
 ### Fueling Plans
 
@@ -156,9 +187,38 @@ curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
   }'
 ```
 
+Log in and keep the bearer token:
+
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "kahlil@example.com",
+    "password": "super-secret-password"
+  }'
+```
+
+Start Strava OAuth:
+
+```bash
+curl http://localhost:8000/users/<user_id>/strava/connect \
+  -H "Authorization: Bearer <access_token>"
+```
+
+The response contains an `authorization_url`. The frontend should redirect the user to that URL. After the user approves in Strava, Strava redirects to `STRAVA_REDIRECT_URI`, and the backend stores the connection.
+
+Sync recent Strava activities into workouts:
+
+```bash
+curl -X POST http://localhost:8000/users/<user_id>/strava/sync \
+  -H "Authorization: Bearer <access_token>"
+```
+
 ## Notes
 
-- There is no auth layer in this minimal version.
+- Login returns a signed bearer token. Set `PEAK_AUTH_SECRET` in production; the built-in default is only for local development.
+- Strava OAuth endpoints require the bearer token user to match the `{user_id}` path parameter.
+- Strava access and refresh tokens are stored server-side and are never returned in API responses.
 - Workouts are treated as Strava-sourced records and support storing the raw Strava payload.
 - Duplicate `strava_activity_id` values are blocked per user so the same workout is not imported twice.
 

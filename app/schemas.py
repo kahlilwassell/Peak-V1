@@ -43,6 +43,12 @@ class UserRead(BaseModel):
     is_male: bool
 
 
+class LoginResponse(UserRead):
+    access_token: str
+    token_type: str = "bearer"
+    expires_in: int
+
+
 class WorkoutCreate(BaseModel):
     strava_activity_id: Optional[str] = Field(default=None, max_length=100)
     name: str = Field(..., min_length=1, max_length=255)
