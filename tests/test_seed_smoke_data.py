@@ -28,8 +28,6 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
         if path == "/" and method == "GET":
             return {"message": "Peak V1 API", "docs": "/docs", "database_backend": "postgres"}
 
-        if path == "/users" and method == "GET":
-            return [state["user"]] if state["user"] else []
         if path == "/users" and method == "POST":
             state["posts"].append(path)
             state["user"] = {
@@ -43,12 +41,26 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
                 "is_male": payload["is_male"],
             }
             return state["user"]
-        if path == "/users/user-1" and method == "GET":
+        if path == "/auth/login" and method == "POST":
+            assert payload == {
+                "email": "smoke-test@peak.local",
+                "password": seed_smoke_data.DEFAULT_PASSWORD,
+            }
+            return {
+                **state["user"],
+                "access_token": "smoke-token",
+                "token_type": "bearer",
+                "expires_in": 604800,
+            }
+        if path == "/auth/me" and method == "GET":
+            assert headers["Authorization"] == "Bearer smoke-token"
             return state["user"]
 
         if path == "/users/user-1/workouts" and method == "GET":
+            assert headers["Authorization"] == "Bearer smoke-token"
             return [state["workout"]] if state["workout"] else []
         if path == "/users/user-1/workouts" and method == "POST":
+            assert headers["Authorization"] == "Bearer smoke-token"
             state["posts"].append(path)
             state["workout"] = {
                 "id": "workout-1",
@@ -67,11 +79,14 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
             }
             return state["workout"]
         if path == "/workouts/workout-1" and method == "GET":
+            assert headers["Authorization"] == "Bearer smoke-token"
             return state["workout"]
 
         if path == "/users/user-1/fueling-plans" and method == "GET":
+            assert headers["Authorization"] == "Bearer smoke-token"
             return [state["plan"]] if state["plan"] else []
         if path == "/users/user-1/fueling-plans" and method == "POST":
+            assert headers["Authorization"] == "Bearer smoke-token"
             state["posts"].append(path)
             state["plan"] = {
                 "id": "plan-1",
@@ -86,6 +101,7 @@ def test_smoke_seed_script_creates_missing_entities(monkeypatch, capsys):
             }
             return state["plan"]
         if path == "/fueling-plans/plan-1" and method == "GET":
+            assert headers["Authorization"] == "Bearer smoke-token"
             return state["plan"]
 
         raise AssertionError(f"Unexpected request: {method} {url}")

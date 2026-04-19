@@ -110,6 +110,7 @@ export PEAK_STRAVA_FAILURE_REDIRECT_URL=http://localhost:3000/settings/integrati
 - `POST /users`
 - `GET /users`
 - `GET /users/{user_id}`
+- `PATCH /users/{user_id}`
 
 ### Authentication
 
@@ -153,11 +154,23 @@ curl -X POST http://localhost:8000/users \
   }'
 ```
 
+Log in and keep the bearer token:
+
+```bash
+curl -X POST http://localhost:8000/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "kahlil@example.com",
+    "password": "super-secret-password"
+  }'
+```
+
 Store a Strava workout for that user:
 
 ```bash
 curl -X POST http://localhost:8000/users/<user_id>/workouts \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access_token>" \
   -d '{
     "strava_activity_id": "123456789",
     "name": "Morning Run",
@@ -177,6 +190,7 @@ Attach a fueling plan to the user or a specific workout:
 ```bash
 curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
   -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <access_token>" \
   -d '{
     "workout_id": "<optional_workout_id>",
     "goal": "Long run fueling",
@@ -184,17 +198,6 @@ curl -X POST http://localhost:8000/users/<user_id>/fueling-plans \
     "hydration_ml_per_hour": 600,
     "sodium_mg_per_hour": 700,
     "notes": "Start at 20 minutes, then every 30 minutes."
-  }'
-```
-
-Log in and keep the bearer token:
-
-```bash
-curl -X POST http://localhost:8000/auth/login \
-  -H "Content-Type: application/json" \
-  -d '{
-    "email": "kahlil@example.com",
-    "password": "super-secret-password"
   }'
 ```
 
@@ -217,10 +220,20 @@ curl -X POST http://localhost:8000/users/<user_id>/strava/sync \
 ## Notes
 
 - Login returns a signed bearer token. Set `PEAK_AUTH_SECRET` in production; the built-in default is only for local development.
-- Strava OAuth endpoints require the bearer token user to match the `{user_id}` path parameter.
+- User-owned endpoints require `Authorization: Bearer <access_token>`.
+- User-owned path endpoints require the bearer token user to match the `{user_id}` path parameter.
+- ID-only resource endpoints, such as `GET /workouts/{workout_id}` and `GET /fueling-plans/{plan_id}`, fetch the record and verify it belongs to the bearer token user before returning it.
 - Strava access and refresh tokens are stored server-side and are never returned in API responses.
 - Workouts are treated as Strava-sourced records and support storing the raw Strava payload.
 - Duplicate `strava_activity_id` values are blocked per user so the same workout is not imported twice.
+
+## Security Design
+
+Public endpoints are limited to `GET /`, `GET /health`, `POST /users`, `POST /auth/login`, `GET /strava/oauth/callback`, and the test-only `POST /test/reset` endpoint when `PEAK_TESTING=true`.
+
+All user-owned routes use the signed bearer token from `POST /auth/login`. Routes with `{user_id}` reject requests where the path user differs from the authenticated user. Routes that identify a resource directly verify ownership after loading the record. `GET /users` is retained for compatibility but returns only the authenticated user.
+
+Strava OAuth uses a signed, short-lived `state` value to bind the callback to the Peak user who started the flow. The frontend receives only the Strava authorization URL and redacted connection metadata; Strava access and refresh tokens remain in the backend database.
 
 ## Railway Deployment
 
@@ -242,6 +255,7 @@ The script is idempotent. It will:
 - verify `GET /health`
 - verify `GET /`
 - create or reuse `smoke-test@peak.local`
+- log in as the smoke-test user and use the returned bearer token
 - create or reuse a workout with `strava_activity_id=peak-smoke-activity`
 - create or reuse a fueling plan attached to that workout
 

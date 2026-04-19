@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Seed and verify a reusable smoke-test user through the public API."""
+"""Seed and verify a reusable smoke-test user through the API."""
 
 import argparse
 import json
 import os
 import sys
-from typing import Any, Dict, Iterable, Optional
+from typing import Any, Dict, Iterable, Optional, Tuple
 from urllib import error, request
 
 
@@ -54,6 +54,8 @@ def request_json(
             return json.loads(raw) if raw else None
     except error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        if exc.code in expected_statuses:
+            return json.loads(detail) if detail else None
         raise RuntimeError(f"{method} {url} failed with {exc.code}: {detail}") from exc
     except error.URLError as exc:
         raise RuntimeError(f"{method} {url} failed: {exc.reason}") from exc
@@ -70,27 +72,23 @@ def find_by(items: Iterable[Dict[str, Any]], key: str, value: Any) -> Optional[D
     return None
 
 
-def ensure_user(base_url: str, headers: Dict[str, str], name: str, email: str) -> Dict[str, Any]:
-    users = request_json(
-        method="GET",
-        url=f"{base_url}/users",
-        headers=headers,
-        expected_statuses={200},
-    )
-    existing = find_by(users, "email", email.lower())
-    if existing:
-        return request_json(
-            method="GET",
-            url=f"{base_url}/users/{existing['id']}",
-            headers=headers,
-            expected_statuses={200},
-        )
+def headers_with_bearer_token(headers: Dict[str, str], access_token: str) -> Dict[str, str]:
+    authenticated_headers = dict(headers)
+    authenticated_headers["Authorization"] = f"Bearer {access_token}"
+    return authenticated_headers
 
-    created = request_json(
+
+def ensure_user(
+    base_url: str,
+    headers: Dict[str, str],
+    name: str,
+    email: str,
+) -> Tuple[Dict[str, Any], Dict[str, str]]:
+    request_json(
         method="POST",
         url=f"{base_url}/users",
         headers=headers,
-        expected_statuses={201},
+        expected_statuses={201, 409},
         payload={
             "name": name,
             "email": email,
@@ -101,12 +99,21 @@ def ensure_user(base_url: str, headers: Dict[str, str], name: str, email: str) -
             "is_male": DEFAULT_IS_MALE,
         },
     )
-    return request_json(
-        method="GET",
-        url=f"{base_url}/users/{created['id']}",
+    login = request_json(
+        method="POST",
+        url=f"{base_url}/auth/login",
         headers=headers,
         expected_statuses={200},
+        payload={"email": email, "password": DEFAULT_PASSWORD},
     )
+    authenticated_headers = headers_with_bearer_token(headers, login["access_token"])
+    user = request_json(
+        method="GET",
+        url=f"{base_url}/auth/me",
+        headers=authenticated_headers,
+        expected_statuses={200},
+    )
+    return user, authenticated_headers
 
 
 def ensure_workout(
@@ -231,7 +238,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--api-key",
         default=os.getenv("PEAK_API_KEY"),
-        help="Optional X-API-Key header value if auth is enabled.",
+        help="Optional X-API-Key header value for deployments that require it.",
     )
     return parser.parse_args()
 
@@ -254,9 +261,20 @@ def main() -> int:
             headers=headers,
             expected_statuses={200},
         )
-        user = ensure_user(base_url, headers, args.name, args.email)
-        workout = ensure_workout(base_url, headers, user["id"], args.activity_id)
-        plan = ensure_fueling_plan(base_url, headers, user["id"], workout["id"], args.goal)
+        user, authenticated_headers = ensure_user(base_url, headers, args.name, args.email)
+        workout = ensure_workout(
+            base_url,
+            authenticated_headers,
+            user["id"],
+            args.activity_id,
+        )
+        plan = ensure_fueling_plan(
+            base_url,
+            authenticated_headers,
+            user["id"],
+            workout["id"],
+            args.goal,
+        )
     except RuntimeError as exc:
         print(f"Smoke test failed: {exc}", file=sys.stderr)
         return 1
