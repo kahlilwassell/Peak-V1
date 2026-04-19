@@ -242,18 +242,23 @@ def create_user(payload: UserCreate) -> Dict[str, Any]:
         return serialize_user(row)
 
 
-@app.get("/users", response_model=List[UserRead])
-def list_users(
+@app.get("/users/me", response_model=UserRead)
+def get_current_user_profile(
     current_user: Dict[str, Any] = Depends(get_current_user),
-) -> List[Dict[str, Any]]:
-    return [current_user]
+) -> Dict[str, Any]:
+    return current_user
 
 
 @app.get("/users/{user_id}", response_model=UserRead)
 def get_user(
     user_id: str,
-    current_user: Dict[str, Any] = Depends(require_current_user_matches_path),
+    current_user: Dict[str, Any] = Depends(get_current_user),
 ) -> Dict[str, Any]:
+    if current_user["id"] != user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Not authorized to access this user.",
+        )
     return current_user
 
 

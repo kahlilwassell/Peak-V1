@@ -108,7 +108,7 @@ export PEAK_STRAVA_FAILURE_REDIRECT_URL=http://localhost:3000/settings/integrati
 ### Users
 
 - `POST /users`
-- `GET /users`
+- `GET /users/me`
 - `GET /users/{user_id}`
 - `PATCH /users/{user_id}`
 
@@ -231,7 +231,7 @@ curl -X POST http://localhost:8000/users/<user_id>/strava/sync \
 
 Public endpoints are limited to `GET /`, `GET /health`, `POST /users`, `POST /auth/login`, `GET /strava/oauth/callback`, and the test-only `POST /test/reset` endpoint when `PEAK_TESTING=true`.
 
-All user-owned routes use the signed bearer token from `POST /auth/login`. Routes with `{user_id}` reject requests where the path user differs from the authenticated user. Routes that identify a resource directly verify ownership after loading the record. `GET /users` is retained for compatibility but returns only the authenticated user.
+All user-owned routes use the signed bearer token from `POST /auth/login`. Routes with `{user_id}` reject requests where the path user differs from the authenticated user. Routes that identify a resource directly verify ownership after loading the record. The API exposes `GET /users/me` for the current profile and does not expose a general user-list endpoint.
 
 Strava OAuth uses a signed, short-lived `state` value to bind the callback to the Peak user who started the flow. The frontend receives only the Strava authorization URL and redacted connection metadata; Strava access and refresh tokens remain in the backend database.
 

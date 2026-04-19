@@ -164,12 +164,12 @@ def test_database_backend_prefers_database_url(monkeypatch):
 # ---------------------------------------------------------------------------
 
 
-def test_create_get_and_list_users(client):
+def test_create_get_user_and_current_user_profile(client):
     created = create_user(client)
     headers = login_headers(client)
 
     get_response = client.get(f"/users/{created['id']}", headers=headers)
-    list_response = client.get("/users", headers=headers)
+    me_response = client.get("/users/me", headers=headers)
 
     assert get_response.status_code == 200
     assert get_response.json()["email"] == "kahlil@example.com"
@@ -178,12 +178,19 @@ def test_create_get_and_list_users(client):
     assert get_response.json()["weight"] == 72
     assert get_response.json()["is_male"] is True
     assert "password" not in get_response.json()
-    assert list_response.status_code == 200
-    assert len(list_response.json()) == 1
-    assert list_response.json()[0]["id"] == created["id"]
-    assert list_response.json()[0]["dob"] == "1994-03-15"
-    # Password must never be exposed in list responses either
-    assert "password" not in list_response.json()[0]
+    assert me_response.status_code == 200
+    assert me_response.json()["id"] == created["id"]
+    assert me_response.json()["dob"] == "1994-03-15"
+    assert "password" not in me_response.json()
+
+
+def test_get_users_collection_is_not_supported(client):
+    create_user(client)
+    headers = login_headers(client)
+
+    response = client.get("/users", headers=headers)
+
+    assert response.status_code == 405
 
 
 def test_created_at_timestamp_has_no_fractional_seconds(client):
@@ -976,15 +983,17 @@ def test_reset_wipes_and_reinitialises_database(testing_client):
     """After a reset, previously created users are gone and new ones can be made."""
     create_user(testing_client, email="before-reset@example.com")
     before_headers = login_headers(testing_client, email="before-reset@example.com")
-    assert len(testing_client.get("/users", headers=before_headers).json()) == 1
+    before_response = testing_client.get("/users/me", headers=before_headers)
+    assert before_response.status_code == 200
 
     reset_response = testing_client.post("/test/reset")
     assert reset_response.status_code == 204
 
-    stale_response = testing_client.get("/users", headers=before_headers)
+    stale_response = testing_client.get("/users/me", headers=before_headers)
     assert stale_response.status_code == 401
 
     # Schema is intact — new registrations work immediately after reset
     create_user(testing_client, email="after-reset@example.com")
     after_headers = login_headers(testing_client, email="after-reset@example.com")
-    assert len(testing_client.get("/users", headers=after_headers).json()) == 1
+    after_response = testing_client.get("/users/me", headers=after_headers)
+    assert after_response.status_code == 200
