@@ -958,10 +958,12 @@ def reset_database() -> Response:
 
     drop_statements = [
         "DROP INDEX IF EXISTS idx_strava_connections_user_id",
+        "DROP INDEX IF EXISTS idx_running_plans_user_id",
         "DROP INDEX IF EXISTS idx_fueling_plans_user_id",
         "DROP INDEX IF EXISTS idx_workouts_user_strava_activity",
         "DROP INDEX IF EXISTS idx_workouts_user_id",
         "DROP TABLE IF EXISTS strava_connections",
+        "DROP TABLE IF EXISTS running_plans",
         "DROP TABLE IF EXISTS fueling_plans",
         "DROP TABLE IF EXISTS workouts",
         "DROP TABLE IF EXISTS users",
