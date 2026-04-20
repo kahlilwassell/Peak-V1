@@ -163,24 +163,61 @@ def fetch_all(
     return execute(connection, query, params).fetchall()
 
 
-_USER_MIGRATIONS = [
-    "ALTER TABLE users ADD COLUMN dob DATE NOT NULL DEFAULT '1900-01-01'",
-    "ALTER TABLE users ADD COLUMN height INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN weight INTEGER NOT NULL DEFAULT 0",
-    "ALTER TABLE users ADD COLUMN is_male BOOLEAN NOT NULL DEFAULT FALSE",
-    "ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ''",
+# Catch-up migrations for pre-existing databases that were created before
+# these columns were part of the `users` schema. On a fresh deploy the
+# CREATE TABLE statement above already contains every column, so these are
+# no-ops and only fire against older SQLite files.
+#
+# Each entry is (column_name, DDL). We introspect the current columns first
+# and only run the DDL for columns that are genuinely missing. This avoids
+# the psycopg3 failure mode where a failed ALTER marks the transaction as
+# aborted and breaks every subsequent statement on the connection with
+# "current transaction is aborted, commands ignored until end of transaction block".
+_USER_COLUMN_ADDITIONS: List[Tuple[str, str]] = [
+    ("dob", "ALTER TABLE users ADD COLUMN dob DATE NOT NULL DEFAULT '1900-01-01'"),
+    ("height", "ALTER TABLE users ADD COLUMN height INTEGER NOT NULL DEFAULT 0"),
+    ("weight", "ALTER TABLE users ADD COLUMN weight INTEGER NOT NULL DEFAULT 0"),
+    ("is_male", "ALTER TABLE users ADD COLUMN is_male BOOLEAN NOT NULL DEFAULT FALSE"),
+    ("password", "ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ''"),
 ]
+
+
+def _existing_user_columns(connection: ConnectionType) -> set:
+    """Return the set of column names currently present on the `users` table.
+
+    Uses `PRAGMA table_info` on SQLite and `information_schema.columns` on
+    Postgres. Returns an empty set if the table does not exist yet — the
+    caller has just created it via SCHEMA_STATEMENTS in that case.
+    """
+    if isinstance(connection, sqlite3.Connection):
+        rows = execute(connection, "PRAGMA table_info(users)").fetchall()
+        return {row["name"] for row in rows}
+
+    # Postgres — scope to the current schema so we don't match a `users`
+    # table in some other schema on the same database.
+    rows = fetch_all(
+        connection,
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = 'users'
+        """,
+    )
+    return {row["column_name"] for row in rows}
 
 
 def init_db() -> None:
     with closing(get_connection()) as connection:
         for statement in SCHEMA_STATEMENTS:
             execute(connection, statement)
-        for migration in _USER_MIGRATIONS:
-            try:
-                execute(connection, migration)
-            except Exception:
-                pass
+
+        existing_columns = _existing_user_columns(connection)
+        for column_name, migration in _USER_COLUMN_ADDITIONS:
+            if column_name in existing_columns:
+                continue
+            execute(connection, migration)
+
         connection.commit()
 
 

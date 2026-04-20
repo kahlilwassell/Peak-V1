@@ -26,5 +26,44 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      - name: Run tests
+      - name: Run tests (SQLite)
         run: pytest
+
+  test-postgres:
+    # Exercises the production code path (psycopg3, ?->%s rewrite, DDL
+    # transaction semantics). The SQLite suite above does not cover these.
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: peak
+          POSTGRES_PASSWORD: peak
+          POSTGRES_DB: peak_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      PEAK_POSTGRES_TEST_URL: postgresql://peak:peak@localhost:5432/peak_test
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Run Postgres integration tests
+        run: pytest tests/test_postgres_integration.py -v
