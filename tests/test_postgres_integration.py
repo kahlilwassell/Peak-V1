@@ -103,10 +103,12 @@ def test_init_db_is_idempotent_on_postgres(pg_client):
 
 def test_user_create_and_read_round_trip(pg_client):
     """Proves the ?->%s rewrite and dict_row factory work end-to-end."""
+    email = "pg-tester@peak.local"
+    password = "super-secret"
     payload = {
         "name": "Postgres Tester",
-        "email": "pg-tester@peak.local",
-        "password": "super-secret",
+        "email": email,
+        "password": password,
         "dob": "1990-01-01",
         "height": 180,
         "weight": 75,
@@ -116,10 +118,15 @@ def test_user_create_and_read_round_trip(pg_client):
     assert create.status_code == 201, create.text
     user_id = create.json()["id"]
 
-    read = pg_client.get("/users/{0}".format(user_id))
+    login = pg_client.post("/auth/login", json={"email": email, "password": password})
+    assert login.status_code == 200, login.text
+    token = login.json()["access_token"]
+    headers = {"Authorization": f"Bearer {token}"}
+
+    read = pg_client.get("/users/{0}".format(user_id), headers=headers)
     assert read.status_code == 200, read.text
     body = read.json()
-    assert body["email"] == "pg-tester@peak.local"
+    assert body["email"] == email
     assert body["height"] == 180
     assert body["is_male"] is True
 
