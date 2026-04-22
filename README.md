@@ -219,94 +219,227 @@ curl -X POST http://localhost:8000/users/<user_id>/strava/sync \
 
 ## Strava OAuth Flow
 
-The Strava OAuth flow is split between the frontend and backend. The frontend starts the flow and redirects the user to Strava. The backend owns the Strava client secret, validates the callback, exchanges the one-time code for tokens, stores those tokens, refreshes them when needed, and imports activities.
+The Strava OAuth flow is split between the frontend and backend:
 
-Before testing the flow, configure the backend environment:
+- The frontend starts the flow, opens Strava's authorization page, and later calls sync/status endpoints.
+- The backend owns the Strava client secret, validates the callback, exchanges the one-time `code` for tokens, stores those tokens, refreshes them when needed, and imports activities.
 
-```bash
-export PEAK_AUTH_SECRET=replace-with-a-long-random-string
-export STRAVA_CLIENT_ID=your-strava-client-id
-export STRAVA_CLIENT_SECRET=your-strava-client-secret
-export STRAVA_REDIRECT_URI=http://localhost:8000/strava/oauth/callback
-export STRAVA_SCOPES=read,activity:read_all
+### 1. Configure Strava
+
+In the Strava API application settings, set the callback domain to the backend domain only:
+
+```text
+peak-v1-production.up.railway.app
 ```
 
-`STRAVA_REDIRECT_URI` must match the callback URL configured in your Strava API application. For production, use the deployed backend URL, for example:
+Do not include `https://` or `/strava/oauth/callback` in Strava's callback domain field.
+
+Use the values from Strava as backend environment variables:
 
 ```bash
-export STRAVA_REDIRECT_URI=https://peak-v1-production.up.railway.app/strava/oauth/callback
+STRAVA_CLIENT_ID=<Strava Client ID>
+STRAVA_CLIENT_SECRET=<Strava Client Secret>
+```
+
+Do not use the access token or refresh token shown in the Strava dashboard. Those are user-specific tokens. This app creates and stores user tokens automatically after OAuth approval.
+
+### 2. Configure The Backend
+
+For Railway production, set these variables on the backend service:
+
+```bash
+DATABASE_URL=<Railway Postgres connection string>
+PEAK_AUTH_SECRET=<long random string>
+STRAVA_CLIENT_ID=<Strava Client ID>
+STRAVA_CLIENT_SECRET=<Strava Client Secret>
+STRAVA_REDIRECT_URI=https://peak-v1-production.up.railway.app/strava/oauth/callback
+STRAVA_SCOPES=read,activity:read_all
+```
+
+Generate `PEAK_AUTH_SECRET` locally:
+
+```bash
+openssl rand -base64 32
+```
+
+For local development, use the local callback URL instead:
+
+```bash
+STRAVA_REDIRECT_URI=http://localhost:8000/strava/oauth/callback
 ```
 
 Optional redirect URLs let the backend send the browser back to the frontend after Strava approves or rejects access:
 
 ```bash
-export PEAK_STRAVA_SUCCESS_REDIRECT_URL=http://localhost:3000/settings/integrations
-export PEAK_STRAVA_FAILURE_REDIRECT_URL=http://localhost:3000/settings/integrations
+PEAK_STRAVA_SUCCESS_REDIRECT_URL=http://localhost:3000/settings/integrations
+PEAK_STRAVA_FAILURE_REDIRECT_URL=http://localhost:3000/settings/integrations
 ```
 
-The end-to-end flow is:
+For the first manual test, leave `PEAK_STRAVA_SUCCESS_REDIRECT_URL` and `PEAK_STRAVA_FAILURE_REDIRECT_URL` unset. The callback will return JSON in the browser, which is easier to debug.
 
-1. The user logs in to Peak:
+After changing Railway variables, redeploy or restart the backend service.
 
-   ```bash
-   curl -X POST http://localhost:8000/auth/login \
-     -H "Content-Type: application/json" \
-     -d '{
-       "email": "kahlil@example.com",
-       "password": "super-secret-password"
-     }'
-   ```
+### 3. Manual Test
 
-   Save the returned `access_token` and user `id`.
+Set the API base URL:
 
-2. The frontend starts Strava OAuth through the backend:
+```bash
+export API_URL=https://peak-v1-production.up.railway.app
+```
 
-   ```bash
-   curl http://localhost:8000/users/<user_id>/strava/connect \
-     -H "Authorization: Bearer <access_token>"
-   ```
+Check that the backend and database are healthy:
 
-   The backend returns:
+```bash
+curl "$API_URL/health" | jq
+```
 
-   ```json
-   {
-     "authorization_url": "https://www.strava.com/oauth/authorize?..."
-   }
-   ```
+Expected:
 
-3. The frontend redirects the browser to `authorization_url`.
+```json
+{
+  "status": "healthy",
+  "database": "ok"
+}
+```
 
-4. The user approves or rejects access on Strava.
+Create a Peak user if needed:
 
-5. Strava redirects back to the backend:
+```bash
+curl -X POST "$API_URL/users" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Kahlil",
+    "email": "kahlil@example.com",
+    "password": "super-secret-password",
+    "dob": "1994-03-15",
+    "height": 178,
+    "weight": 72,
+    "is_male": true
+  }' | jq
+```
 
-   ```text
-   GET /strava/oauth/callback?code=<code>&scope=<scope>&state=<state>
-   ```
+Log in and save the returned `id` and `access_token`:
 
-   The backend validates `state`, exchanges `code` with Strava, and stores the resulting access token, refresh token, athlete id, scope, and expiration in `strava_connections`.
+```bash
+curl -X POST "$API_URL/auth/login" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "kahlil@example.com",
+    "password": "super-secret-password"
+  }' | jq
+```
 
-6. If `PEAK_STRAVA_SUCCESS_REDIRECT_URL` is set, the backend redirects the browser there with `status=connected`. If it is not set, the callback returns JSON with the redacted connection record.
+Export those values:
 
-7. The frontend can check connection status:
+```bash
+export USER_ID=<id from login>
+export PEAK_TOKEN=<access_token from login>
+```
 
-   ```bash
-   curl http://localhost:8000/users/<user_id>/strava/connection \
-     -H "Authorization: Bearer <access_token>"
-   ```
+Start Strava OAuth:
 
-8. The frontend can trigger a sync:
+```bash
+curl "$API_URL/users/$USER_ID/strava/connect" \
+  -H "Authorization: Bearer $PEAK_TOKEN" | jq
+```
 
-   ```bash
-   curl -X POST http://localhost:8000/users/<user_id>/strava/sync \
-     -H "Authorization: Bearer <access_token>"
-   ```
+Expected:
 
-   The backend refreshes the Strava access token if needed, fetches recent Strava activities, inserts new workouts, and returns the import count.
+```json
+{
+  "authorization_url": "https://www.strava.com/oauth/authorize?..."
+}
+```
 
-Security notes for this flow:
+Open the returned `authorization_url` in a browser and approve access in Strava.
 
-- `STRAVA_CLIENT_SECRET`, Strava access tokens, and Strava refresh tokens stay on the backend.
+After approval, Strava redirects to:
+
+```text
+GET /strava/oauth/callback?code=<code>&scope=<scope>&state=<state>
+```
+
+If frontend redirect URLs are unset, the browser should show JSON like:
+
+```json
+{
+  "status": "connected",
+  "user_id": "...",
+  "connection": {
+    "strava_athlete_id": "...",
+    "scope": "read,activity:read_all",
+    "last_synced_at": null
+  }
+}
+```
+
+Check the saved Strava connection:
+
+```bash
+curl "$API_URL/users/$USER_ID/strava/connection" \
+  -H "Authorization: Bearer $PEAK_TOKEN" | jq
+```
+
+The response should include connection metadata but must not include Strava `access_token` or `refresh_token`.
+
+Sync recent Strava activities:
+
+```bash
+curl -X POST "$API_URL/users/$USER_ID/strava/sync" \
+  -H "Authorization: Bearer $PEAK_TOKEN" | jq
+```
+
+Expected:
+
+```json
+{
+  "imported_workouts": 0,
+  "last_synced_at": "..."
+}
+```
+
+`imported_workouts` can be `0` if there are no new activities to import.
+
+List imported workouts:
+
+```bash
+curl "$API_URL/users/$USER_ID/workouts" \
+  -H "Authorization: Bearer $PEAK_TOKEN" | jq
+```
+
+### 4. What Happens Internally
+
+1. `GET /users/{user_id}/strava/connect` creates a signed, short-lived OAuth `state` value and returns a Strava authorization URL.
+2. The user approves access on Strava.
+3. Strava calls `GET /strava/oauth/callback` with `code`, `scope`, and `state`.
+4. The backend verifies `state`, exchanges `code` for Strava tokens, and stores the connection in `strava_connections`.
+5. `POST /users/{user_id}/strava/sync` refreshes the Strava access token if needed, fetches activities, and inserts any new workouts.
+
+### 5. Troubleshooting
+
+If `/strava/connect` returns `503`, one of these variables is missing from the backend environment:
+
+```text
+STRAVA_CLIENT_ID
+STRAVA_CLIENT_SECRET
+STRAVA_REDIRECT_URI
+```
+
+If Strava rejects the authorization URL, check that:
+
+- `STRAVA_REDIRECT_URI` exactly matches the backend callback URL.
+- The Strava app callback domain is only the backend domain, with no protocol or path.
+- The backend was redeployed after changing variables.
+
+If `/strava/oauth/callback` returns `Invalid or expired Strava OAuth state`, rerun `/strava/connect` and use the new authorization URL. The `state` value expires after about 10 minutes.
+
+If `/strava/sync` returns `404 Strava connection not found`, the OAuth callback did not save a connection for that Peak user. Repeat the connect flow and verify the callback JSON says `status: connected`.
+
+If `/strava/sync` returns `imported_workouts: 0`, the sync worked but Strava returned no new activities that were not already imported.
+
+### 6. Security Notes
+
+- `STRAVA_CLIENT_SECRET`, Strava access tokens, and Strava refresh tokens stay on the backend and must not be committed to git.
 - The frontend only receives the Strava authorization URL and redacted connection metadata.
 - The signed OAuth `state` value binds the callback to the Peak user who started the flow.
 - All user-scoped Strava endpoints require `Authorization: Bearer <access_token>` and reject requests where the token user does not match `{user_id}`.
