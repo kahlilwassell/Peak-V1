@@ -103,6 +103,7 @@ class RunningPlanCreate(BaseModel):
     distance_km: float = Field(..., gt=0, description="Planned distance in kilometres")
     speed_kph: float = Field(..., gt=0, description="Intended speed in km/h")
     notes: Optional[str] = Field(default=None, max_length=2000)
+    location: Optional[str] = Field(default=None, max_length=500, description="Starting location (city or address)")
 
     @model_validator(mode="after")
     def planned_at_must_be_future(self) -> "RunningPlanCreate":
@@ -123,6 +124,14 @@ class RunningPlanRead(BaseModel):
     distance_km: float
     speed_kph: float
     notes: Optional[str] = None
+    location: Optional[str] = None
+    # Estimated nutrient / fluid losses for this planned run
+    estimated_fluid_ml: Optional[int] = None
+    estimated_sodium_mg: Optional[int] = None
+    estimated_carbs_g: Optional[int] = None
+    # Weather conditions used by the estimator (None when no location was given)
+    weather_temp_c: Optional[float] = None
+    weather_humidity_pct: Optional[float] = None
     created_at: datetime
 
 
