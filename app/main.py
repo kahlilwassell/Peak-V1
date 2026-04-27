@@ -62,6 +62,7 @@ from app.schemas import (
     WorkoutCreate,
     WorkoutRead,
 )
+from app.fueling_estimator import estimate_run_fueling, fetch_weather_for_plan
 from app.strava import (
     build_authorization_url,
     exchange_code_for_token,
@@ -521,29 +522,57 @@ def get_fueling_plan(
 def create_running_plan(
     user_id: str,
     payload: RunningPlanCreate,
-    _: Dict[str, Any] = Depends(require_current_user_matches_path),
+    current_user: Dict[str, Any] = Depends(require_current_user_matches_path),
 ) -> Dict[str, Any]:
-    """Create a scheduled running plan for a user."""
+    """Create a scheduled running plan for a user.
+
+    Automatically estimates fluid, sodium, and carbohydrate losses based on
+    the runner's body weight, gender, planned pace, and forecasted weather at
+    the run location (fetched from Open-Meteo when a location is provided).
+    """
+    # ── Fetch weather for the run location / time (non-blocking fallback) ──
+    temp_c, humidity_pct = fetch_weather_for_plan(payload.location, payload.planned_at)
+
+    # ── Estimate fueling needs ──────────────────────────────────────────────
+    estimates = estimate_run_fueling(
+        weight_kg=current_user["weight"],
+        is_male=bool(current_user["is_male"]),
+        distance_km=payload.distance_km,
+        speed_kph=payload.speed_kph,
+        temp_celsius=temp_c,
+        humidity_pct=humidity_pct,
+    )
+
     with closing(get_connection()) as connection:
         fetch_user_or_404(connection, user_id)
         plan_id = str(uuid4())
         created_at = utc_now_iso()
         # Store planned_at as whole-second ISO string (same rule as created_at)
-        planned_at = payload.planned_at.replace(microsecond=0).isoformat()
+        planned_at_str = payload.planned_at.replace(microsecond=0).isoformat()
         execute(
             connection,
             """
-            INSERT INTO running_plans
-                (id, user_id, planned_at, distance_km, speed_kph, notes, created_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO running_plans (
+                id, user_id, planned_at, distance_km, speed_kph, notes, location,
+                estimated_fluid_ml, estimated_sodium_mg, estimated_carbs_g,
+                weather_temp_c, weather_humidity_pct,
+                created_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 plan_id,
                 user_id,
-                planned_at,
+                planned_at_str,
                 payload.distance_km,
                 payload.speed_kph,
                 payload.notes,
+                payload.location,
+                estimates["estimated_fluid_ml"],
+                estimates["estimated_sodium_mg"],
+                estimates["estimated_carbs_g"],
+                estimates["weather_temp_c"],
+                estimates["weather_humidity_pct"],
                 created_at,
             ),
         )
@@ -563,7 +592,11 @@ def list_running_plans(
         rows = fetch_all(
             connection,
             """
-            SELECT id, user_id, planned_at, distance_km, speed_kph, notes, created_at
+            SELECT
+                id, user_id, planned_at, distance_km, speed_kph, notes, location,
+                estimated_fluid_ml, estimated_sodium_mg, estimated_carbs_g,
+                weather_temp_c, weather_humidity_pct,
+                created_at
             FROM running_plans
             WHERE user_id = ?
             ORDER BY planned_at ASC

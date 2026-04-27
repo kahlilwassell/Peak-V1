@@ -103,6 +103,12 @@ SCHEMA_STATEMENTS = [
         distance_km REAL NOT NULL,
         speed_kph REAL NOT NULL,
         notes TEXT,
+        location TEXT,
+        estimated_fluid_ml INTEGER,
+        estimated_sodium_mg INTEGER,
+        estimated_carbs_g INTEGER,
+        weather_temp_c REAL,
+        weather_humidity_pct REAL,
         created_at TEXT NOT NULL,
         FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
     )
@@ -181,6 +187,15 @@ _USER_COLUMN_ADDITIONS: List[Tuple[str, str]] = [
     ("password", "ALTER TABLE users ADD COLUMN password TEXT NOT NULL DEFAULT ''"),
 ]
 
+_RUNNING_PLAN_COLUMN_ADDITIONS: List[Tuple[str, str]] = [
+    ("location",              "ALTER TABLE running_plans ADD COLUMN location TEXT"),
+    ("estimated_fluid_ml",    "ALTER TABLE running_plans ADD COLUMN estimated_fluid_ml INTEGER"),
+    ("estimated_sodium_mg",   "ALTER TABLE running_plans ADD COLUMN estimated_sodium_mg INTEGER"),
+    ("estimated_carbs_g",     "ALTER TABLE running_plans ADD COLUMN estimated_carbs_g INTEGER"),
+    ("weather_temp_c",        "ALTER TABLE running_plans ADD COLUMN weather_temp_c REAL"),
+    ("weather_humidity_pct",  "ALTER TABLE running_plans ADD COLUMN weather_humidity_pct REAL"),
+]
+
 
 def _existing_user_columns(connection: ConnectionType) -> set:
     """Return the set of column names currently present on the `users` table.
@@ -207,14 +222,42 @@ def _existing_user_columns(connection: ConnectionType) -> set:
     return {row["column_name"] for row in rows}
 
 
+def _existing_columns(connection: ConnectionType, table: str) -> set:
+    """Return the set of column names currently present on *table*.
+
+    Returns an empty set if the table does not yet exist.
+    """
+    if isinstance(connection, sqlite3.Connection):
+        rows = execute(connection, f"PRAGMA table_info({table})").fetchall()
+        return {row["name"] for row in rows}
+
+    rows = fetch_all(
+        connection,
+        """
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_schema = current_schema()
+          AND table_name = ?
+        """,
+        (table,),
+    )
+    return {row["column_name"] for row in rows}
+
+
 def init_db() -> None:
     with closing(get_connection()) as connection:
         for statement in SCHEMA_STATEMENTS:
             execute(connection, statement)
 
-        existing_columns = _existing_user_columns(connection)
+        existing_user_cols = _existing_user_columns(connection)
         for column_name, migration in _USER_COLUMN_ADDITIONS:
-            if column_name in existing_columns:
+            if column_name in existing_user_cols:
+                continue
+            execute(connection, migration)
+
+        existing_plan_cols = _existing_columns(connection, "running_plans")
+        for column_name, migration in _RUNNING_PLAN_COLUMN_ADDITIONS:
+            if column_name in existing_plan_cols:
                 continue
             execute(connection, migration)
 
@@ -338,7 +381,11 @@ def fetch_running_plan_or_404(connection: ConnectionType, plan_id: str) -> RowMa
     row = fetch_one(
         connection,
         """
-        SELECT id, user_id, planned_at, distance_km, speed_kph, notes, created_at
+        SELECT
+            id, user_id, planned_at, distance_km, speed_kph, notes, location,
+            estimated_fluid_ml, estimated_sodium_mg, estimated_carbs_g,
+            weather_temp_c, weather_humidity_pct,
+            created_at
         FROM running_plans
         WHERE id = ?
         """,
