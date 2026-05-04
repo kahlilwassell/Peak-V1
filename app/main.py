@@ -194,6 +194,24 @@ def health_check() -> Dict[str, str]:
     return {"status": "healthy", "database": "ok"}
 
 
+@app.get("/users/email-available")
+def check_email_available(email: str) -> Dict[str, Any]:
+    """Check whether an email address is available for registration.
+
+    Returns ``{"available": true}`` if no account exists with that email,
+    ``{"available": false}`` otherwise.  No authentication required —
+    this is a pre-registration check.
+    """
+    normalised = email.strip().lower()
+    with closing(get_connection()) as connection:
+        row = fetch_one(
+            connection,
+            "SELECT id FROM users WHERE email = ?",
+            (normalised,),
+        )
+    return {"available": row is None}
+
+
 @app.post("/users", response_model=UserRead, status_code=status.HTTP_201_CREATED)
 def create_user(payload: UserCreate) -> Dict[str, Any]:
     user_id = str(uuid4())
